@@ -1,0 +1,12 @@
+﻿<?xml version='1.0' encoding='utf-8'?>
+<SettingsFile xmlns="http://schemas.microsoft.com/VisualStudio/2004/01/settings" CurrentProfile="(Default)" GeneratedClassNamespace="Scripts.Properties" GeneratedClassName="Script">
+  <Profiles />
+  <Settings>
+    <Setting Name="DefaultShowName" Type="System.String" Scope="User">
+      <Value Profile="(Default)">Unnamed</Value>
+    </Setting>
+    <Setting Name="InputPath" Type="System.String" Scope="User">
+      <Value Profile="(Default)">D:\Encoding\Video</Value>
+    </Setting>
+  </Settings>
+</SettingsFile>
