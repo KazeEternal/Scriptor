@@ -100,19 +100,35 @@ namespace Scripts
         [ExecutorRoutine("Rename Files By disc in reverse order", "Takes each disc grouping and renames them from the last file to the first for the episode number.")]
         public static void RenameShowByDiscReverseOrder(string showName, int seasonNumber, string path, string discRegEx)
         {
-            throw new NotSupportedException();
             DirectoryInfo dInfo = new DirectoryInfo(path);
 
             if (dInfo.Exists)
             {
                 int episodeNumber = 1;
-                foreach (FileInfo fInfo in dInfo.GetFiles().OrderBy(file => file.Name))
+                int discNumber = 1;
+                bool iterate = true;
+                FileInfo[] files = dInfo.GetFiles();
+
+                while (iterate)
                 {
-                    string oldName = fInfo.Name;
-                    string outputName = string.Format("{0} - S{1}E{2}{3}.", showName, seasonNumber.ToString("00"), episodeNumber.ToString("00"), fInfo.Extension);
-                    fInfo.MoveTo(Path.Combine(dInfo.FullName, outputName));
-                    Console.WriteLine("Episode {0}\n\tOldName: {1}\n\tNewName: {2}", episodeNumber.ToString("00"), oldName, outputName);
-                    episodeNumber++;
+                    FileInfo[] discFiles = files.Where(file =>
+                    {
+                        return file.Name.Contains("Disc " + discNumber);
+                    }).OrderByDescending(file => file.Name).ToArray();
+
+                    iterate = discFiles.Length > 0;
+
+                    if (!iterate)
+                        break;
+
+                    foreach (FileInfo fInfo in discFiles)
+                    {
+                        string oldName = fInfo.Name;
+                        string outputName = string.Format("{0} - S{1}E{2}{3}.", showName, seasonNumber.ToString("00"), episodeNumber.ToString("00"), fInfo.Extension);
+                        fInfo.MoveTo(Path.Combine(dInfo.FullName, outputName));
+                        Console.WriteLine("Episode {0}\n\tOldName: {1}\n\tNewName: {2}", episodeNumber.ToString("00"), oldName, outputName);
+                        episodeNumber++;
+                    }
                 }
             }
         }
