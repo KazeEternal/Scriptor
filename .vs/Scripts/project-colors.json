@@ -1,0 +1,16 @@
+{
+  "Version": 1,
+  "ProjectMap": {
+    "d6bf2b9d-578f-47ed-93d1-81c27954574b": {
+      "ProjectGuid": "d6bf2b9d-578f-47ed-93d1-81c27954574b",
+      "DisplayName": "Scripts",
+      "ColorIndex": 0
+    },
+    "fc9d42b7-9a2e-452c-843d-bbf611e61d81": {
+      "ProjectGuid": "fc9d42b7-9a2e-452c-843d-bbf611e61d81",
+      "DisplayName": "Test Output",
+      "ColorIndex": 1
+    }
+  },
+  "NextColorIndex": 2
+}

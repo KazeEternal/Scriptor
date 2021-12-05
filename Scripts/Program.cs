@@ -1,14 +1,186 @@
-﻿using System;
+﻿#define NEW_CODE
+using System;
 using System.IO;
 using System.Linq;
 using System.Configuration;
 using System.Reflection;
 using System.Collections.Generic;
+using Scripts.Scriptor;
+using Scripts.Scriptor.Attributor;
 
 namespace Scripts
 {
     class Program
     {
+#if NEW_CODE
+        private static IScriptContext _ScriptContext;
+        public static void Main(string[] args)
+        {
+            Logger.Event += Logger_Event;
+            Logger.Warning += Logger_Warning;
+            Logger.Error += Logger_Error;
+
+            bool isRunning = true;
+            while (isRunning)
+            {
+                Type type = typeof(IScriptCollection);
+                List<Type> typeScriptCollections = AppDomain.CurrentDomain.GetAssemblies()
+                    .SelectMany(selected => selected.GetTypes())
+                    .Where(classType => type.IsAssignableFrom(classType) && type != classType).ToList();
+
+                int indexCounter = 0;
+                Console.WriteLine("Please Select the type of Operation you are executing:");
+
+                foreach (Type collectionType in typeScriptCollections)
+                {
+                    indexCounter++;
+                    String name = (collectionType.GetCustomAttribute(typeof(ScriptCollectionNameAttribute)) as ScriptCollectionNameAttribute)?.Name;
+                    String Description = (collectionType.GetCustomAttribute(typeof(ScriptCollectionDescriptionAttribute)) as ScriptCollectionDescriptionAttribute)?.Description;
+
+                    Console.WriteLine("{0}) {1} - {2}\n", indexCounter, name != null ? name : collectionType.Name, Description != null ? Description : String.Empty);
+                }
+
+                int selection;
+                while (!ReaderSelection(out selection) && (selection - 1) < typeScriptCollections.Count && selection > 0) ;
+
+                Console.Clear();
+
+                _ScriptContext = new IScriptContext();
+                HandleScriptCollection(typeScriptCollections[selection - 1]);
+
+                Console.Write("Completed Running {0}: ", _ScriptContext.Name);
+                Console.ForegroundColor = _ScriptContext.IsSuccess ? ConsoleColor.Green : ConsoleColor.Red;
+                Console.WriteLine(_ScriptContext.IsSuccess ? "[SUCCESS]" : "[FAILED]");
+                Console.ForegroundColor = ConsoleColor.White;
+
+                while (true)
+                {
+                    Console.WriteLine("Start Over (Y/n)? ");
+                    string result = Console.ReadLine();
+
+                    if(string.IsNullOrEmpty(result) || result.ToLower() == "y")
+                    {
+                        Console.Clear();
+                        break;
+                    }
+                    else if(result.ToLower() == "n")
+                    {
+                        isRunning = false;
+                        break;
+                    }
+                    
+                }
+            }
+        }
+
+        private static void Logger_Error(string format, params object[] args)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine(format, args);
+            Console.ResetColor();
+        }
+
+        private static void Logger_Warning(string format, params object[] args)
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine(format, args);
+            Console.ResetColor();
+        }
+
+        private static void Logger_Event(string format, params object[] args)
+        {
+            Console.WriteLine(format, args);
+        }
+
+        private static void HandleScriptCollection(Type scriptCollectionType)
+        {
+            //We Only care about the default constructor. If we need more than that we'll have to expand functionality. 
+            //Anything else should be handled through ScriptContext.
+            ConstructorInfo ctor = scriptCollectionType.GetConstructor(new Type[] { });
+
+            //We now have an instance of the type that we can pass into our method calls. 
+            //Should allow the script writer to maintain values they deem valuable.
+            //Not sure if this is a wise move given ScriptContext.
+            object instance = ctor.Invoke(null); 
+
+            //We now want to grab the methods within based on the ScriptRoutineAttribute. 
+            //The provide them to the user as scripts they can run from the script collection that was passed in.
+            MethodInfo[] methods = scriptCollectionType.GetMethods().Where(method => method.GetCustomAttributes(typeof(ScriptRoutineAttribute), true).Length > 0).ToArray();
+            int indexCounter = 0;
+            Console.WriteLine("Please Select a Script to Run from the Colleciton:");
+            foreach (MethodInfo method in methods)
+            {
+                indexCounter++;
+                ScriptRoutineAttribute routine = (ScriptRoutineAttribute)method.GetCustomAttributes(typeof(ScriptRoutineAttribute), true)[0];
+                Console.WriteLine("{0}) {1} - {2}", indexCounter, routine.Name != null ? routine.Name : method.Name, routine.Description != null ? routine.Description : String.Empty);
+            }
+
+            int selection;
+            while (!ReaderSelection(out selection) && (selection - 1) < methods.Length && selection > 0) ;
+
+            MethodInfo methodToRun = methods[selection - 1];
+            ScriptRoutineAttribute routineToRun = (ScriptRoutineAttribute)methodToRun.GetCustomAttributes(typeof(ScriptRoutineAttribute), true)[0];
+
+            Console.Clear();
+            Console.WriteLine("---------Setup to Run {0}----------", routineToRun.Name != null ? routineToRun.Name : methodToRun.Name);
+            List<object> args = new List<object>();
+            args.Add(_ScriptContext);
+            foreach(ParameterInfo pInfo in methodToRun.GetParameters())
+            {
+                if (pInfo.ParameterType == typeof(IScriptContext))
+                    continue;
+
+                Attribute attribute = pInfo.GetCustomAttribute(typeof(ParameterAttribute));
+                ParameterAttribute pAt = attribute as ParameterAttribute;
+
+                object toAdd;
+                while (!ParseInput(pInfo.ParameterType,
+                        string.Format("-->{0} : ", pAt?.Name != null ? pAt?.Name : pInfo.Name),
+                                    out toAdd))
+                {
+                    Console.WriteLine("Incorrect format type, looking for {0}", pInfo.ParameterType.FullName);
+                }
+                args.Add(toAdd);
+            }
+
+            _ScriptContext.Name = routineToRun.Name;
+            methodToRun.Invoke(instance, args.ToArray());
+        }
+
+        private static bool ParseInput(Type parameterType, string itemToRequest, out object toAdd)
+        {
+            Console.Write(itemToRequest);
+            String value = Console.ReadLine();
+
+            bool isSuccess = false;
+            toAdd = null;
+            if ( parameterType == typeof(string) || 
+                parameterType ==typeof(String))
+            {
+                toAdd = value;
+                isSuccess = true;
+            }
+            else if( parameterType == typeof(int) )
+            {
+                int output;
+                if (int.TryParse(value, out output))
+                {
+                    toAdd = output;
+                    isSuccess = true;
+                }
+            }
+            
+            return isSuccess;
+        }
+
+        public static bool ReaderSelection(out int selection)
+        {
+            Console.Write("Enter Selection: ");
+            return int.TryParse(Console.ReadLine(), out selection);
+        }
+
+
+#else
         static void Main(string[] args)
         {
             List<MethodInfo> routines = new List<MethodInfo>();
@@ -143,5 +315,6 @@ namespace Scripts
                 }
             }
         }
+#endif
     }
 }
