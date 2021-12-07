@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 /*
@@ -84,6 +85,37 @@ namespace Scripts.Scripting
                         episodeNumber++;
                     }
                     discNumber++;
+                }
+            }
+        }
+
+        [ScriptRoutine("Rename Files Cleanly based on S##E##", "Assumes that the season and episode naming convention is already applied and needs to be cleaned up.")]
+        public static void RenameShowCleanly(
+            IScriptContext context,
+            [Parameter("Show Name", "The Name of the Show to Use", "This will prefix the name of the show on the files name.", "New Show")]
+            string showName,
+            [Parameter("Folder Path", "The folder where the files live.")]
+            string path)
+        {
+            DirectoryInfo dInfo = new DirectoryInfo(path);
+
+            if (dInfo.Exists)
+            {
+                
+                foreach (FileInfo fInfo in dInfo.GetFiles().OrderBy(file => file.Name))
+                {
+                    string oldName = fInfo.Name;
+
+                    Regex regex = new Regex(@"S\d{1,2}([-+]?E\d{1,2})+");
+                    Match match = regex.Match(oldName);
+
+                    if (match.Success)
+                    {
+                        string outputName = string.Format("{0} - {1}.{2}", showName, match.Value, fInfo.Extension);
+                        fInfo.MoveTo(Path.Combine(dInfo.FullName, outputName));
+                        Logger.WriteLine(Logger.LogLevel.Event, "Episode {0}\n\tOldName: {1}\n\tNewName: {2}", match.Value.Substring(match.Value.IndexOf("S") + 1), oldName, outputName);
+                    }
+                    
                 }
             }
         }
