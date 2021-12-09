@@ -119,5 +119,62 @@ namespace Scripts.Scripting
                 }
             }
         }
+        [ScriptRoutine("Rename Files By Disc Offset One Ring Order", "Takes the disc number and offsets order by N ")]
+        public static void RenameShowByRoundRobinDiscOrder(
+            IScriptContext context,
+            [Parameter("Show Name", "The Name of the Show to Use", "This will prefix the name of the show on the files name.", "New Show")]
+            string showName,
+            [Parameter("Season Number", "The Season of the show that the file will be using", "The Numerical Value of the season. Value must be between 0 <-> 9999", 1)]
+            int seasonNumber,
+            [Parameter("Folder Path", "The folder where the files live.")]
+            string path,
+            [Parameter("Offset by N", "The number of episodes starting from n to n+1 from")]
+            int offset)
+        {
+            DirectoryInfo dInfo = new DirectoryInfo(path);
+
+            if (dInfo.Exists)
+            {
+                int episodeNumber = 1;
+                int discNumber = 1;
+                bool iterate = true;
+                FileInfo[] files = dInfo.GetFiles();
+
+                while (iterate)
+                {
+                    FileInfo[] discFiles = files.Where(file =>
+                    {
+                        return file.Name.Contains("Disc " + discNumber);
+                    }).ToArray();
+
+                    iterate = discFiles.Length > 0;
+
+                    if (!iterate)
+                        break;
+
+                    
+                    int currentOffset = discFiles.Length - offset;
+                    int episodeNumberOffset = currentOffset + episodeNumber;
+                    int startingEpisodeNumber = episodeNumber;
+                    foreach (FileInfo fInfo in discFiles)
+                    {
+                        
+                        string oldName = fInfo.Name;
+                        string outputName = string.Format("{0} - S{1}E{2}{3}", showName, seasonNumber.ToString("00"), episodeNumberOffset.ToString("00"), fInfo.Extension);
+                        fInfo.MoveTo(Path.Combine(dInfo.FullName, outputName));
+                        Logger.WriteLine(Logger.LogLevel.Event, "Episode {0}\n\tOldName: {1}\n\tNewName: {2}", episodeNumberOffset.ToString("00"), oldName, outputName);
+                        currentOffset++;
+                        episodeNumberOffset++;
+                        if (currentOffset >= discFiles.Length)
+                        {
+                            episodeNumberOffset = startingEpisodeNumber;
+                            currentOffset = 0;
+                        }
+                        episodeNumber++;
+                    }
+                    discNumber++;
+                }
+            }
+        }
     }
 }
