@@ -176,5 +176,37 @@ namespace Scripts.Scripting
                 }
             }
         }
+        [ScriptRoutine("Rename Files that were manual inspected", "All files with the n.1 value for an episode will get renamed to S##EN. This is for manual sorting. Anything else will remain untouched.")]
+        public static void RenameShowByTruncatingDecimal(
+            IScriptContext context,
+            [Parameter("Folder Path", "The folder where the files live.")]
+            string path)
+        {
+            DirectoryInfo dInfo = new DirectoryInfo(path);
+
+            if (dInfo.Exists)
+            {
+                
+                FileInfo[] files = dInfo.GetFiles();
+
+                foreach (FileInfo fInfo in files)
+                {
+                    Regex regex = new Regex(@"S\d{1,2}([-+]?E\d{1,2})+.1");
+
+                    Match match = regex.Match(fInfo.Name);
+                    if (match.Success)
+                    {
+                        int index = fInfo.Name.IndexOf(match.Value);
+                        string prefix = fInfo.Name.Substring(0, index);
+                        string postfix = fInfo.Name.Substring(index + match.Value.Length);
+                        string oldName = fInfo.Name;
+
+                        string outputName = string.Format("{0}{1}{2}", prefix, match.Value.Substring(0, match.Value.IndexOf('.')), postfix);
+                        //fInfo.MoveTo(Path.Combine(dInfo.FullName, outputName));
+                        Logger.WriteLine(Logger.LogLevel.Event, "\n\tOldName: {0}\n\tNewName: {1}", oldName, outputName);
+                    }  
+                }
+            }
+        }
     }
 }
