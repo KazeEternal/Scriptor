@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Collections.Generic;
 using Scripts.Scriptor;
 using Scripts.Scriptor.Attributor;
+using System.Text.RegularExpressions;
 
 namespace Scripts
 {
@@ -112,7 +113,8 @@ namespace Scripts
             {
                 indexCounter++;
                 ScriptRoutineAttribute routine = (ScriptRoutineAttribute)method.GetCustomAttributes(typeof(ScriptRoutineAttribute), true)[0];
-                Console.WriteLine("{0}) {1} - {2}", indexCounter, routine.Name != null ? routine.Name : method.Name, routine.Description != null ? routine.Description : String.Empty);
+                Console.WriteLine("\t{0}) {1}", indexCounter, routine.Name != null ? routine.Name : method.Name);
+                Console.WriteLine("\t{0}", routine.Description != null ? InsertNthAsString(routine.Description, "\n\t") : String.Empty);
             }
 
             int selection;
@@ -179,7 +181,13 @@ namespace Scripts
             return int.TryParse(Console.ReadLine(), out selection);
         }
 
+        public static string InsertNthAsString(string input, string insert)
+        {
+            const int maxLineLength = 85;
+            //input = Regex.Replace(input, @"\s+\n", "\n", RegexOptions.Multiline);
 
+            return Regex.Replace(input, @"(?s).{0," + maxLineLength + @"}",  m => m.Value.EndsWith("\n") ? m.Value + "\t" : m.Value + "\n\t");
+        }
 #else
         static void Main(string[] args)
         {

@@ -202,7 +202,7 @@ namespace Scripts.Scripting
                         string oldName = fInfo.Name;
 
                         string outputName = string.Format("{0}{1}{2}", prefix, match.Value.Substring(0, match.Value.IndexOf('.')), postfix);
-                        //fInfo.MoveTo(Path.Combine(dInfo.FullName, outputName));
+                        fInfo.MoveTo(Path.Combine(dInfo.FullName, outputName));
                         Logger.WriteLine(Logger.LogLevel.Event, "\n\tOldName: {0}\n\tNewName: {1}", oldName, outputName);
                     }  
                 }
