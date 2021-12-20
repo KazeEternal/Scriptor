@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using Scripts.Scriptor;
 using Scripts.Scriptor.Attributor;
 using System.Text.RegularExpressions;
+using Scripts.Scriptor.Historator;
 
 namespace Scripts
 {
@@ -20,6 +21,8 @@ namespace Scripts
             Logger.Event += Logger_Event;
             Logger.Warning += Logger_Warning;
             Logger.Error += Logger_Error;
+
+            Archive archive = Archive.Load("Archive.xml");
 
             bool isRunning = true;
             while (isRunning)
@@ -114,7 +117,7 @@ namespace Scripts
                 indexCounter++;
                 ScriptRoutineAttribute routine = (ScriptRoutineAttribute)method.GetCustomAttributes(typeof(ScriptRoutineAttribute), true)[0];
                 Console.WriteLine("\t{0}) {1}", indexCounter, routine.Name != null ? routine.Name : method.Name);
-                Console.WriteLine("\t{0}", routine.Description != null ? InsertNthAsString(routine.Description, "\n\t") : String.Empty);
+                Console.WriteLine("\t     {0}", routine.Description != null ? InsertNthAsString(routine.Description, "\n\t") : String.Empty);
             }
 
             int selection;
@@ -135,24 +138,33 @@ namespace Scripts
                 Attribute attribute = pInfo.GetCustomAttribute(typeof(ParameterAttribute));
                 ParameterAttribute pAt = attribute as ParameterAttribute;
 
+                string lastValue = Archive.GetArchive().Retrieve(methodToRun.DeclaringType, methodToRun.Name, pInfo.Name);
+
                 object toAdd;
                 while (!ParseInput(pInfo.ParameterType,
-                        string.Format("-->{0} : ", pAt?.Name != null ? pAt?.Name : pInfo.Name),
-                                    out toAdd))
+                        string.Format("-->{0}{1} : ", pAt?.Name != null ? pAt?.Name : pInfo.Name, lastValue != null ? $"({lastValue})" : string.Empty),
+                                    out toAdd, lastValue))
                 {
                     Console.WriteLine("Incorrect format type, looking for {0}", pInfo.ParameterType.FullName);
                 }
+                Archive.GetArchive().Change(methodToRun.DeclaringType, methodToRun.Name, pInfo.Name,toAdd);
                 args.Add(toAdd);
             }
 
             _ScriptContext.Name = routineToRun.Name;
+            Archive.GetArchive().Commit();
             methodToRun.Invoke(instance, args.ToArray());
         }
 
-        private static bool ParseInput(Type parameterType, string itemToRequest, out object toAdd)
+        private static bool ParseInput(Type parameterType, string itemToRequest, out object toAdd, string defaultValue = "")
         {
             Console.Write(itemToRequest);
             String value = Console.ReadLine();
+            
+            if(String.IsNullOrWhiteSpace(value))
+            {
+                value = defaultValue;
+            }
 
             bool isSuccess = false;
             toAdd = null;
