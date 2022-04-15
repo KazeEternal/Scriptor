@@ -36,15 +36,8 @@ namespace Scripts.Scripting
                 {
                     string oldName = fInfo.Name;
                     string outputName = string.Format("{0} - S{1}E{2}{3}.", showName, seasonNumber.ToString("00"), episodeNumber.ToString("00"), fInfo.Extension);
-                    if (oldName != outputName)
-                    {
-                        fInfo.MoveTo(Path.Combine(dInfo.FullName, outputName));
-                        Logger.WriteLine(Logger.LogLevel.Event, "Episode {0}\n\tOldName: {1}\n\tNewName: {2}", episodeNumber.ToString("00"), oldName, outputName);
-                    }
-                    else
-                    {
-                        Logger.WriteLine(Logger.LogLevel.Event, "Episode {0}\n\tFile Name is Identical: ", episodeNumber.ToString("00"), oldName, outputName);
-                    }
+                    fInfo.MoveTo(Path.Combine(dInfo.FullName, outputName));
+                    Logger.WriteLine(Logger.LogLevel.Event, "Episode {0}\n\tOldName: {1}\n\tNewName: {2}", episodeNumber.ToString("00"), oldName, outputName);
                     episodeNumber++;
                 }
             }

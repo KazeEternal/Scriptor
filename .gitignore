@@ -3,3 +3,6 @@ Scripts/obj/
 Test Output/bin/
 Test Output/obj/
 .vs/
+CompiledScripts/obj/
+GUI/obj/
+ScriptorCommon/obj/
