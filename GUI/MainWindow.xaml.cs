@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Scripts.Scriptor;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -23,6 +24,24 @@ namespace GUI
         public MainWindow()
         {
             InitializeComponent();
+            Logger.Event += Logger_Event;
+            Logger.Warning += Logger_Warning;
+            Logger.Error += Logger_Error;
+        }
+
+        private void Logger_Event(string format, object[] args)
+        {
+            
+        }
+
+        private void Logger_Warning(string format, object[] args)
+        {
+            
+        }
+
+        private void Logger_Error(string format, object[] args)
+        {
+            
         }
     }
 }

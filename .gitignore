@@ -6,3 +6,6 @@ Test Output/obj/
 CompiledScripts/obj/
 GUI/obj/
 ScriptorCommon/obj/
+GUI/bin/
+CompiledScripts/bin/
+ScriptorCommon/bin/
