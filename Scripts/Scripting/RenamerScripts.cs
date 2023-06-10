@@ -213,5 +213,30 @@ namespace Scripts.Scripting
                 }
             }
         }
+        [ScriptRoutine("Extension Swap", "All files ending with an extension will have it's extension switched for a new one.")]
+        public static void RenameExtensionToNewExtension(
+            IScriptContext context,
+            [Parameter("Folder Path", "The Folder wehre the files live.")]
+            string path,
+            [Parameter("Old Extension", "the Extension to replace")]
+            string oldExtension,
+            [Parameter("New Extension", "The new extension to use")]
+            string newExtension)
+        {
+            DirectoryInfo dInfo = new DirectoryInfo(path);
+
+            if (dInfo.Exists)
+            {
+
+                FileInfo[] files = dInfo.GetFiles();
+                var fil = files.Where(o => o.Extension == "." + oldExtension);
+                foreach (FileInfo fInfo in fil)
+                {
+                    string newPath = Path.ChangeExtension(fInfo.FullName, newExtension);
+                    fInfo.MoveTo(newPath);
+                    Logger.WriteLine(Logger.LogLevel.Event, "\n\tOldName: {0}\n\tNewName: {1}", fInfo.FullName, newPath);
+                }
+            }
+        }
     }
 }
