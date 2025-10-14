@@ -46,7 +46,7 @@ namespace Scripts.Scriptor.Historator
             //Probably need a switch for enum and object handling of the support is ever added.
             //We'll deal with that road when we come to it. For now we'll just parse in strings
             //based on reflection of object type pulled from the typeID and parameter name.
-            recordParameter.Value = value.ToString();
+            recordParameter.Value = value?.ToString();
         }
 
         public string Retrieve(Type typeFullName, string typeID, string parameter)

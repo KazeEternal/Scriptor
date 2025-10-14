@@ -168,16 +168,25 @@ namespace Scripts
 
             bool isSuccess = false;
             toAdd = null;
-            if ( parameterType == typeof(string) || 
-                parameterType ==typeof(String))
+            if (parameterType == typeof(string) ||
+                parameterType == typeof(String))
             {
                 toAdd = value;
                 isSuccess = true;
             }
-            else if( parameterType == typeof(int) )
+            else if (parameterType == typeof(int))
             {
                 int output;
                 if (int.TryParse(value, out output))
+                {
+                    toAdd = output;
+                    isSuccess = true;
+                }
+            }
+            else if (parameterType == typeof(bool))
+            {
+                bool output;
+                if(bool.TryParse(value, out output))
                 {
                     toAdd = output;
                     isSuccess = true;
