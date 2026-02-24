@@ -59,7 +59,7 @@ namespace Scripts.Scripting
             await using var source = await response.Content.ReadAsStreamAsync(ct);
             await using var destination = File.Create(dest);
 
-            var buffer = new byte[81920];
+            var buffer = new byte[100000000];
             long totalRead = 0;
             int read;
             while ((read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), ct)) > 0)
