@@ -11,6 +11,18 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\ScriptorCommon\ScriptorCommon.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\User_Defined_Scripts\**\*.cs">
+      <Link>Scripts\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>Scripts\%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Update="Properties\Script.Designer.cs">
       <DesignTimeSharedInput>True</DesignTimeSharedInput>
       <AutoGen>True</AutoGen>

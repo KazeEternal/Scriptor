@@ -1,0 +1,74 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="GUI.MainWindow"
+        Width="980"
+        Height="640"
+        Title="Scriptor GUI">
+  <Grid RowDefinitions="Auto,*,Auto,Auto" ColumnDefinitions="*">
+    <StackPanel Orientation="Horizontal" Spacing="8" Margin="8">
+      <Button x:Name="ReloadButton" Content="Reload Scripts" />
+      <Button x:Name="RunButton" Content="Run Selected" />
+      <Button x:Name="GenerateProjectButton" Content="Generate Project" />
+    </StackPanel>
+
+    <Grid Grid.Row="1" ColumnDefinitions="320,Auto,*" Margin="8">
+      <Border Grid.Column="0" BorderThickness="1" BorderBrush="Gray" Padding="8" Margin="0,0,4,0">
+        <Grid RowDefinitions="*,Auto,120">
+          <Grid Grid.Row="0" RowDefinitions="Auto,*">
+            <TextBlock Grid.Row="0" Text="Collections" FontWeight="SemiBold" Margin="0,0,0,6" />
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+              <StackPanel x:Name="CollectionsPanel" />
+            </ScrollViewer>
+          </Grid>
+
+          <TextBlock Grid.Row="1" Text="Collection Description" FontWeight="SemiBold" Margin="0,6,0,6" />
+          <Border Grid.Row="2" BorderThickness="1" BorderBrush="Gray" Padding="6">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+              <TextBlock x:Name="CollectionDescription" TextWrapping="Wrap" />
+            </ScrollViewer>
+          </Border>
+        </Grid>
+      </Border>
+
+      <GridSplitter Grid.Column="1"
+                    Width="6"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch"
+                    Background="Gray"
+                    ShowsPreview="True"
+                    ResizeDirection="Columns"
+                    ResizeBehavior="PreviousAndNext" />
+
+      <Border Grid.Column="2" BorderThickness="1" BorderBrush="Gray" Padding="8" Margin="4,0,0,0">
+        <Grid RowDefinitions="Auto,*,Auto,Auto">
+          <TextBlock Text="Routine Configuration" FontWeight="SemiBold" />
+          <Border Grid.Row="1" BorderThickness="1" BorderBrush="Gray" Padding="6" Margin="0,6,0,6">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+              <StackPanel x:Name="ParameterPanel" />
+            </ScrollViewer>
+          </Border>
+          <Border Grid.Row="2" BorderThickness="1" BorderBrush="Gray" Padding="6" Height="110" Margin="0,0,0,6">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+              <TextBlock x:Name="RoutineDescription" TextWrapping="Wrap" />
+            </ScrollViewer>
+          </Border>
+          <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+            <Button x:Name="SaveDefaultsButton" Content="Save Defaults" />
+            <Button x:Name="RunSelectedButton" Content="Run" />
+          </StackPanel>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <Border Grid.Row="2" BorderThickness="1" BorderBrush="Gray" Padding="6" Margin="8,0,8,0">
+      <TextBlock x:Name="ScriptPathStatus" TextWrapping="Wrap" />
+    </Border>
+
+    <Border Grid.Row="3" BorderThickness="1" BorderBrush="Gray" Padding="8" Margin="8">
+      <StackPanel Spacing="6">
+        <TextBlock Text="Log" FontWeight="SemiBold" />
+        <TextBox x:Name="LogBox" AcceptsReturn="True" IsReadOnly="True" Height="140" />
+      </StackPanel>
+    </Border>
+  </Grid>
+</Window>

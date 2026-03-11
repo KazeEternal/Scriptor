@@ -2,14 +2,28 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows7.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
-    <UseWPF>true</UseWPF>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\CompiledScripts\CompiledScripts.csproj" />
     <ProjectReference Include="..\ScriptorCommon\ScriptorCommon.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.3" />
+    <PackageReference Include="HtmlAgilityPack" Version="1.11.40" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\User_Defined_Scripts\**\*.cs">
+      <Link>Scripts\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>Scripts\%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
+    </None>
   </ItemGroup>
 
 </Project>
