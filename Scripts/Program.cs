@@ -17,6 +17,7 @@ namespace Scripts
             Logger.Error += Logger_Error;
 
             var scriptsRoot = Path.Combine(AppContext.BaseDirectory, "Scripts");
+            Logger.ConfigureFileLogging(scriptsRoot);
             using var runtime = new ScriptRuntimeService(scriptsRoot);
             runtime.ScriptsReloaded += (_, snapshot) =>
             {

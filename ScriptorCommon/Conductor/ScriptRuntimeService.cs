@@ -151,6 +151,7 @@ namespace Scripts.Scriptor.Conductor
         public async Task<ScriptExecutionResult> ExecuteRoutineAsync(
             ScriptRoutineDescriptor routine,
             IReadOnlyList<object?> arguments,
+            string? executionScopeId = null,
             CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
@@ -160,7 +161,7 @@ namespace Scripts.Scriptor.Conductor
                 throw new ArgumentNullException(nameof(routine));
             }
 
-            return await Task.Run(() => ExecuteRoutineCore(routine, arguments), cancellationToken).ConfigureAwait(false);
+            return await Task.Run(() => ExecuteRoutineCore(routine, arguments, executionScopeId), cancellationToken).ConfigureAwait(false);
         }
 
         public void Dispose()
@@ -187,9 +188,14 @@ namespace Scripts.Scriptor.Conductor
             _debounceTimer.Change(ReloadDebounce, Timeout.InfiniteTimeSpan);
         }
 
-        private ScriptExecutionResult ExecuteRoutineCore(ScriptRoutineDescriptor routine, IReadOnlyList<object?> arguments)
+        private ScriptExecutionResult ExecuteRoutineCore(
+            ScriptRoutineDescriptor routine,
+            IReadOnlyList<object?> arguments,
+            string? executionScopeId)
         {
             var stopwatch = Stopwatch.StartNew();
+            var start = DateTimeOffset.Now;
+            var scopeId = string.IsNullOrWhiteSpace(executionScopeId) ? Guid.NewGuid().ToString("N") : executionScopeId;
             var context = new IScriptContext
             {
                 Name = routine.Name,
@@ -198,6 +204,7 @@ namespace Scripts.Scriptor.Conductor
 
             try
             {
+                using var scope = Logger.BeginScope(scopeId);
                 var method = routine.Method;
                 var methodParameters = method.GetParameters();
                 var invokeArgs = new List<object?>(methodParameters.Length);
@@ -224,13 +231,13 @@ namespace Scripts.Scriptor.Conductor
                 method.Invoke(instance, invokeArgs.ToArray());
 
                 stopwatch.Stop();
-                return new ScriptExecutionResult(true, context, null, stopwatch.Elapsed);
+                return new ScriptExecutionResult(true, scopeId, start, context, null, stopwatch.Elapsed);
             }
             catch (Exception ex)
             {
                 stopwatch.Stop();
                 context.IsSuccess = false;
-                return new ScriptExecutionResult(false, context, ex, stopwatch.Elapsed);
+                return new ScriptExecutionResult(false, scopeId, start, context, ex, stopwatch.Elapsed);
             }
         }
 
@@ -274,7 +281,17 @@ namespace Scripts.Scriptor.Conductor
                 null,
                 null)).ToList();
 
-            var combinedDiagnostics = partialAttempt.Diagnostics.Concat(excludedDiagnostics).ToList();
+            var fullAttemptErrorsForExcludedFiles = fullAttempt.Diagnostics
+                .Where(d =>
+                    string.Equals(d.Severity, DiagnosticSeverity.Error.ToString(), StringComparison.OrdinalIgnoreCase) &&
+                    !string.IsNullOrWhiteSpace(d.FilePath) &&
+                    failedFiles.Contains(d.FilePath!))
+                .ToList();
+
+            var combinedDiagnostics = partialAttempt.Diagnostics
+                .Concat(fullAttemptErrorsForExcludedFiles)
+                .Concat(excludedDiagnostics)
+                .ToList();
             return partialAttempt with { Diagnostics = combinedDiagnostics };
         }
 
@@ -423,6 +440,8 @@ namespace Scripts.Scriptor.Conductor
             AddAssembly(typeof(WebClient).Assembly);
             AddAssembly(typeof(ZipFile).Assembly);
             AddAssembly(typeof(Regex).Assembly);
+            AddAssembly(typeof(Parallel).Assembly);
+            AddAssembly(typeof(Enumerable).Assembly);
             AddAssembly(typeof(XmlReader).Assembly);
             AddAssembly(typeof(XPathExpression).Assembly);
 

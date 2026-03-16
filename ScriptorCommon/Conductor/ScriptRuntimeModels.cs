@@ -37,6 +37,8 @@ namespace Scripts.Scriptor.Conductor
 
     public sealed record ScriptExecutionResult(
         bool IsSuccess,
+        string ExecutionScopeId,
+        DateTimeOffset StartedAt,
         IScriptContext Context,
         Exception? Exception,
         TimeSpan Duration);
