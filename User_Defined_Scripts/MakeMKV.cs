@@ -25,18 +25,25 @@ namespace Scripts.Scripting
         {
             try
             {
-                CancellationTokenSource cts = new CancellationTokenSource();
-                var prog = new Progress<double>(p => Console.Write( $"\rDownload Progress: {p:F1}%"));
-                DownloadWithProgressAsync(url, downloadPath, prog, cts.Token).GetAwaiter().GetResult();
+                using CancellationTokenSource cts = new CancellationTokenSource();
+                var downloadTask = context.CreateProgressChannel("Download keydb archive");
+                DownloadWithProgressAsync(url, downloadPath, downloadTask, cts.Token).GetAwaiter().GetResult();
+                downloadTask.Complete("Download complete");
 
                 Logger.WriteLine(Logger.LogLevel.Event, "Download Complete, Extracting now...");
 
+                var extractTask = context.CreateProgressChannel("Extract keydb archive");
+                extractTask.Report(15, "Preparing extraction");
+
                 if (File.Exists(Path.Combine(installPath, "keydb.cfg")))
                 {
+                    extractTask.Report(40, "Removing existing keydb.cfg");
                     File.Delete(Path.Combine(installPath, "keydb.cfg"));
                 }
 
+                extractTask.Report(70, "Extracting archive");
                 ZipFile.ExtractToDirectory(downloadPath, installPath, overwriteFiles: true);
+                extractTask.Complete("Extraction complete");
                 Logger.WriteLine(Logger.LogLevel.Event, "Extraction complete!");
             }
             catch (Exception ex)
@@ -49,7 +56,7 @@ namespace Scripts.Scripting
             context.IsSuccess = true;
         }
 
-        private static async Task DownloadWithProgressAsync(string url, string dest, IProgress<double> progress, CancellationToken ct)
+        private static async Task DownloadWithProgressAsync(string url, string dest, ScriptProgressChannel progress, CancellationToken ct)
         {
             using var http = new HttpClient();
             using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
@@ -59,7 +66,7 @@ namespace Scripts.Scripting
             await using var source = await response.Content.ReadAsStreamAsync(ct);
             await using var destination = File.Create(dest);
 
-            var buffer = new byte[100000000];
+            var buffer = new byte[64 * 1024];
             long totalRead = 0;
             int read;
             while ((read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), ct)) > 0)
@@ -67,7 +74,9 @@ namespace Scripts.Scripting
                 await destination.WriteAsync(buffer.AsMemory(0, read), ct);
                 totalRead += read;
                 if (contentLength != -1)
-                    progress?.Report((double)totalRead / contentLength * 100);
+                {
+                    progress.Report((double)totalRead / contentLength * 100, "Downloading keydb archive");
+                }
             }
         }
     }

@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Markup.Xaml;
@@ -56,6 +57,8 @@ namespace GUI
         public MainWindow()
         {
             InitializeComponent();
+
+            RestoreWindowState();
 
             _reloadButton.Click += ReloadButton_Click;
             _runButton.Click += RunButton_Click;
@@ -433,7 +436,7 @@ namespace GUI
             SaveCurrentRoutineDefaults();
             ClearRunLog();
             var scopeId = Guid.NewGuid().ToString("N");
-            var row = StartRunRow(scopeId, _currentRoutine.Name, DateTimeOffset.Now);
+            var row = StartRunRow(scopeId, _currentRoutine.Name, DateTimeOffset.Now, isRunning: true, collapseOnComplete: false);
             AddRunMessage(scopeId, $"Running {_currentRoutine.Name}...");
 
             var result = await _runtime.ExecuteRoutineAsync(_currentRoutine, converted, scopeId).ConfigureAwait(false);
@@ -481,7 +484,7 @@ namespace GUI
             var scopeId = Guid.NewGuid().ToString("N");
             Dispatcher.UIThread.Post(() =>
             {
-                StartRunRow(scopeId, item.DisplayName, DateTimeOffset.Now);
+                StartRunRow(scopeId, item.DisplayName, DateTimeOffset.Now, isRunning: true, collapseOnComplete: true);
                 AddRunMessage(scopeId, $"Running playlist item {item.DisplayName}...");
             });
 
@@ -729,6 +732,81 @@ namespace GUI
             return Path.Combine(scriptsRoot, ".scriptor", "playlists.json");
         }
 
+        private static string GetWindowStatePath()
+        {
+            var scriptsRoot = ResolveScriptsRoot();
+            return Path.Combine(scriptsRoot, ".scriptor", "window-state.json");
+        }
+
+        private void RestoreWindowState()
+        {
+            try
+            {
+                var path = GetWindowStatePath();
+                if (!File.Exists(path))
+                {
+                    return;
+                }
+
+                var json = File.ReadAllText(path);
+                var state = JsonSerializer.Deserialize<WindowSessionState>(json);
+                if (state == null)
+                {
+                    return;
+                }
+
+                if (state.Width > 300)
+                {
+                    Width = state.Width;
+                }
+
+                if (state.Height > 200)
+                {
+                    Height = state.Height;
+                }
+
+                if (state.X.HasValue && state.Y.HasValue)
+                {
+                    Position = new PixelPoint(state.X.Value, state.Y.Value);
+                }
+
+                if (!string.IsNullOrWhiteSpace(state.WindowState) && Enum.TryParse<WindowState>(state.WindowState, out var parsedState))
+                {
+                    WindowState = parsedState;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private void SaveWindowState()
+        {
+            try
+            {
+                var state = new WindowSessionState
+                {
+                    WindowState = WindowState.ToString(),
+                    Width = Bounds.Width,
+                    Height = Bounds.Height,
+                };
+
+                if (WindowState == WindowState.Normal)
+                {
+                    state.X = Position.X;
+                    state.Y = Position.Y;
+                }
+
+                var path = GetWindowStatePath();
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                var json = JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true });
+                File.WriteAllText(path, json);
+            }
+            catch
+            {
+            }
+        }
+
         private static List<PlaylistDefinition> LoadPlaylists()
         {
             try
@@ -815,7 +893,12 @@ namespace GUI
             }
         }
 
-        private RoutineRunRowUi StartRunRow(string scopeId, string scriptName, DateTimeOffset startedAt, bool isRunning = true)
+        private RoutineRunRowUi StartRunRow(
+            string scopeId,
+            string scriptName,
+            DateTimeOffset startedAt,
+            bool isRunning = true,
+            bool collapseOnComplete = false)
         {
             if (_runRowsByScope.TryGetValue(scopeId, out var existing))
             {
@@ -900,6 +983,7 @@ namespace GUI
             var row = new RoutineRunRowUi(scopeId, scriptName, toggleButton, detailsPanel, statusText, statusBadge, timeText, startedAt)
             {
                 IsRunning = isRunning,
+                CollapseOnComplete = collapseOnComplete,
             };
             row.ToggleButton.Content = row.DetailsPanel.IsVisible ? "▾" : "▸";
             _runRowsByScope[scopeId] = row;
@@ -1173,6 +1257,12 @@ namespace GUI
             row.StatusText.Foreground = success ? SuccessStatusBrush : FailureStatusBrush;
             row.StatusBadge.Background = Brushes.Transparent;
             row.TimeText.Text = elapsed.ToString(@"mm\:ss\.fff");
+
+            if (row.CollapseOnComplete)
+            {
+                row.DetailsPanel.IsVisible = false;
+                row.ToggleButton.Content = "▸";
+            }
         }
 
         private void AppendLog(string message)
@@ -1216,6 +1306,7 @@ namespace GUI
             public DateTimeOffset StartedAt { get; }
             public Dictionary<string, ProgressRowUi> ProgressBars { get; } = new(StringComparer.OrdinalIgnoreCase);
             public bool IsRunning { get; set; }
+            public bool CollapseOnComplete { get; set; }
         }
 
         private sealed class ProgressRowUi
@@ -1231,11 +1322,21 @@ namespace GUI
 
         protected override void OnClosed(EventArgs e)
         {
+            SaveWindowState();
             Logger.EntryWritten -= Logger_EntryWritten;
             _statusSpinnerTimer.Stop();
             _statusSpinnerTimer.Tick -= StatusSpinnerTimer_Tick;
             _runtime.Dispose();
             base.OnClosed(e);
+        }
+
+        private sealed class WindowSessionState
+        {
+            public double Width { get; set; }
+            public double Height { get; set; }
+            public int? X { get; set; }
+            public int? Y { get; set; }
+            public string? WindowState { get; set; }
         }
     }
 }
