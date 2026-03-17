@@ -15,6 +15,7 @@ using System.Xml;
 using System.Xml.XPath;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Scripts.Scriptor;
 using Scripts.Scriptor.Attributor;
 
 namespace Scripts.Scriptor.Conductor
@@ -26,11 +27,13 @@ namespace Scripts.Scriptor.Conductor
         private readonly object _gate = new();
         private readonly Timer _debounceTimer;
         private readonly List<MetadataReference> _metadataReferences = new();
+        private readonly List<string> _packageAssemblyPaths = new();
         private FileSystemWatcher? _watcher;
         private ScriptAssemblyLoadContext? _loadContext;
         private Assembly? _scriptAssembly;
         private string? _lastAssemblyPath;
         private bool _disposed;
+        private string? _lastPackageDependencySignature;
 
         public ScriptRuntimeService(string scriptsRoot)
         {
@@ -111,6 +114,7 @@ namespace Scripts.Scriptor.Conductor
             string? oldAssemblyPath = null;
             lock (_gate)
             {
+                BuildMetadataReferences();
                 compilationResult = CompileScripts();
                 if (!compilationResult.Succeeded)
                 {
@@ -123,7 +127,7 @@ namespace Scripts.Scriptor.Conductor
                     CompilationFailed?.Invoke(this, compilationResult.Diagnostics);
                 }
 
-                var newContext = new ScriptAssemblyLoadContext(compilationResult.AssemblyPath);
+                var newContext = new ScriptAssemblyLoadContext(compilationResult.AssemblyPath, _packageAssemblyPaths);
                 var assembly = LoadAssemblyIntoContext(newContext, compilationResult.AssemblyPath);
                 var snapshot = BuildSnapshot(assembly);
 
@@ -416,6 +420,7 @@ namespace Scripts.Scriptor.Conductor
         private void BuildMetadataReferences()
         {
             _metadataReferences.Clear();
+            _packageAssemblyPaths.Clear();
             var assemblyPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             void AddAssembly(Assembly assembly)
@@ -436,6 +441,25 @@ namespace Scripts.Scriptor.Conductor
                 AddAssembly(assembly);
             }
 
+            if (AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") is string tpa)
+            {
+                foreach (var path in tpa.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    try
+                    {
+                        if (!assemblyPaths.Add(path))
+                        {
+                            continue;
+                        }
+
+                        _metadataReferences.Add(MetadataReference.CreateFromFile(path));
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+
             AddAssembly(typeof(HttpClient).Assembly);
             AddAssembly(typeof(WebClient).Assembly);
             AddAssembly(typeof(ZipFile).Assembly);
@@ -445,11 +469,265 @@ namespace Scripts.Scriptor.Conductor
             AddAssembly(typeof(XmlReader).Assembly);
             AddAssembly(typeof(XPathExpression).Assembly);
 
+            var packageDependencies = DiscoverPackageDependenciesFromScripts();
+            if (packageDependencies.Count > 0)
+            {
+                Logger.WriteLine(
+                    Logger.LogLevel.Event,
+                    "Detected script package dependencies: {0}",
+                    string.Join(", ", packageDependencies.Select(d => string.IsNullOrWhiteSpace(d.Version) ? d.PackageId : $"{d.PackageId} ({d.Version})")));
+            }
+            AddPackageAssemblyReferences(packageDependencies, assemblyPaths);
+
             var htmlAgilityPack = TryLoadAssembly("HtmlAgilityPack");
             if (htmlAgilityPack != null)
             {
                 AddAssembly(htmlAgilityPack);
             }
+        }
+
+        private IReadOnlyList<ScriptPackageDependency> DiscoverPackageDependenciesFromScripts()
+        {
+            if (!Directory.Exists(ScriptsRoot))
+            {
+                return Array.Empty<ScriptPackageDependency>();
+            }
+
+            var regex = new Regex("ScriptPackageDependency\\s*\\(\\s*\"(?<id>[^\"]+)\"(?:\\s*,\\s*\"(?<version>[^\"]+)\")?", RegexOptions.Compiled);
+            var results = new Dictionary<string, ScriptPackageDependency>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var file in Directory.EnumerateFiles(ScriptsRoot, "*.cs", SearchOption.AllDirectories))
+            {
+                var content = File.ReadAllText(file);
+                var matches = regex.Matches(content);
+                foreach (Match match in matches)
+                {
+                    if (!match.Success)
+                    {
+                        continue;
+                    }
+
+                    var id = match.Groups["id"].Value.Trim();
+                    var version = match.Groups["version"].Success ? match.Groups["version"].Value.Trim() : null;
+                    if (string.IsNullOrWhiteSpace(id))
+                    {
+                        continue;
+                    }
+
+                    results[id] = new ScriptPackageDependency(id, string.IsNullOrWhiteSpace(version) ? null : version);
+                }
+            }
+
+            return results.Values.ToList();
+        }
+
+        private void AddPackageAssemblyReferences(
+            IReadOnlyList<ScriptPackageDependency> dependencies,
+            ISet<string> assemblyPaths)
+        {
+            if (dependencies.Count == 0)
+            {
+                return;
+            }
+
+            var signature = string.Join("|", dependencies
+                .OrderBy(d => d.PackageId, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(d => d.Version, StringComparer.OrdinalIgnoreCase)
+                .Select(d => $"{d.PackageId}:{d.Version}"));
+
+            if (!string.Equals(_lastPackageDependencySignature, signature, StringComparison.OrdinalIgnoreCase))
+            {
+                var restored = RestoreScriptPackageProject(dependencies);
+                if (!restored)
+                {
+                    Logger.WriteLine(Logger.LogLevel.Warning, "Package restore did not complete successfully. Script package references may be unavailable.");
+                }
+                _lastPackageDependencySignature = signature;
+            }
+
+            var globalPackages = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
+            if (string.IsNullOrWhiteSpace(globalPackages))
+            {
+                globalPackages = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nuget", "packages");
+            }
+
+            if (!Directory.Exists(globalPackages))
+            {
+                Logger.WriteLine(Logger.LogLevel.Warning, "NuGet package cache directory not found: {0}", globalPackages);
+                return;
+            }
+
+            foreach (var dependency in dependencies)
+            {
+                var packageRoot = Path.Combine(globalPackages, dependency.PackageId.ToLowerInvariant());
+                if (!Directory.Exists(packageRoot))
+                {
+                    Logger.WriteLine(Logger.LogLevel.Warning, "Package not found in cache after restore: {0}", dependency.PackageId);
+                    continue;
+                }
+
+                var versionFolder = ResolvePackageVersionFolder(packageRoot, dependency.Version);
+                if (versionFolder == null)
+                {
+                    Logger.WriteLine(Logger.LogLevel.Warning, "Unable to resolve package version folder for: {0}", dependency.PackageId);
+                    continue;
+                }
+
+                var libFolder = ResolveBestLibFolder(versionFolder);
+                if (libFolder == null)
+                {
+                    Logger.WriteLine(Logger.LogLevel.Warning, "No compatible lib folder found for package: {0}", dependency.PackageId);
+                    continue;
+                }
+
+                Logger.WriteLine(Logger.LogLevel.Event, "Resolved package '{0}' to '{1}'", dependency.PackageId, libFolder);
+
+                var addedReferenceCount = 0;
+                var mappedRuntimeCount = 0;
+
+                foreach (var dll in Directory.EnumerateFiles(libFolder, "*.dll", SearchOption.TopDirectoryOnly))
+                {
+                    try
+                    {
+                        if (!_packageAssemblyPaths.Contains(dll, StringComparer.OrdinalIgnoreCase))
+                        {
+                            _packageAssemblyPaths.Add(dll);
+                            mappedRuntimeCount++;
+                        }
+
+                        if (assemblyPaths.Add(dll))
+                        {
+                            _metadataReferences.Add(MetadataReference.CreateFromFile(dll));
+                            addedReferenceCount++;
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                Logger.WriteLine(
+                    Logger.LogLevel.Event,
+                    "Added {0} package compile reference(s), mapped {1} runtime assembly path(s) for {2}.",
+                    addedReferenceCount,
+                    mappedRuntimeCount,
+                    dependency.PackageId);
+            }
+        }
+
+        private bool RestoreScriptPackageProject(IReadOnlyList<ScriptPackageDependency> dependencies)
+        {
+            try
+            {
+                Logger.WriteLine(Logger.LogLevel.Event, "Restoring script package dependencies ({0})...", dependencies.Count);
+                var generated = ScriptProjectGenerator.EnsureScriptProject(
+                    ScriptsRoot,
+                    dependencies,
+                    commonProjectPath: null,
+                    commonAssemblyPath: typeof(Logger).Assembly.Location);
+
+                Logger.WriteLine(Logger.LogLevel.Event, "Generated/updated script package project: {0}", generated.ProjectPath);
+
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = "dotnet",
+                    Arguments = $"restore \"{generated.ProjectPath}\"",
+                    WorkingDirectory = Path.GetDirectoryName(generated.ProjectPath) ?? ScriptsRoot,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
+
+                using var process = Process.Start(startInfo);
+                if (process == null)
+                {
+                    Logger.WriteLine(Logger.LogLevel.Error, "Failed to start 'dotnet restore' process.");
+                    return false;
+                }
+
+                process.WaitForExit();
+                var output = process.StandardOutput.ReadToEnd();
+                var error = process.StandardError.ReadToEnd();
+
+                if (!string.IsNullOrWhiteSpace(output))
+                {
+                    Logger.WriteLine(Logger.LogLevel.Event, "dotnet restore output: {0}", output.Trim());
+                }
+
+                if (process.ExitCode != 0)
+                {
+                    if (!string.IsNullOrWhiteSpace(error))
+                    {
+                        Logger.WriteLine(Logger.LogLevel.Error, "dotnet restore failed: {0}", error.Trim());
+                    }
+
+                    Logger.WriteLine(Logger.LogLevel.Error, "dotnet restore exit code: {0}", process.ExitCode);
+
+                    return false;
+                }
+
+                if (!string.IsNullOrWhiteSpace(error))
+                {
+                    Logger.WriteLine(Logger.LogLevel.Warning, "dotnet restore warnings: {0}", error.Trim());
+                }
+
+                Logger.WriteLine(Logger.LogLevel.Event, "Package restore completed successfully.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.WriteLine(Logger.LogLevel.Error, "Package restore failed with exception: {0}", ex.Message);
+                return false;
+            }
+        }
+
+        private static string? ResolvePackageVersionFolder(string packageRoot, string? requestedVersion)
+        {
+            if (!string.IsNullOrWhiteSpace(requestedVersion))
+            {
+                var exact = Path.Combine(packageRoot, requestedVersion);
+                if (Directory.Exists(exact))
+                {
+                    return exact;
+                }
+            }
+
+            return Directory.EnumerateDirectories(packageRoot)
+                .OrderByDescending(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
+        }
+
+        private static string? ResolveBestLibFolder(string versionFolder)
+        {
+            var libRoot = Path.Combine(versionFolder, "lib");
+            if (!Directory.Exists(libRoot))
+            {
+                return null;
+            }
+
+            var priorities = new[]
+            {
+                "net10.0",
+                "net9.0",
+                "net8.0",
+                "net7.0",
+                "net6.0",
+                "netstandard2.1",
+                "netstandard2.0"
+            };
+
+            foreach (var tfm in priorities)
+            {
+                var candidate = Path.Combine(libRoot, tfm);
+                if (Directory.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+            return Directory.EnumerateDirectories(libRoot)
+                .OrderByDescending(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
         }
 
         private static Assembly? TryLoadAssembly(string name)
@@ -520,11 +798,16 @@ namespace Scripts.Scriptor.Conductor
         private sealed class ScriptAssemblyLoadContext : AssemblyLoadContext
         {
             private readonly AssemblyDependencyResolver _resolver;
+            private readonly Dictionary<string, string> _packageAssemblyMap;
+            private readonly HashSet<string> _unresolvedAssemblyNames = new(StringComparer.OrdinalIgnoreCase);
 
-            public ScriptAssemblyLoadContext(string mainAssemblyPath)
+            public ScriptAssemblyLoadContext(string mainAssemblyPath, IEnumerable<string> packageAssemblyPaths)
                 : base(isCollectible: true)
             {
                 _resolver = new AssemblyDependencyResolver(mainAssemblyPath);
+                _packageAssemblyMap = packageAssemblyPaths
+                    .GroupBy(path => Path.GetFileNameWithoutExtension(path), StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
             }
 
             protected override Assembly? Load(AssemblyName assemblyName)
@@ -533,6 +816,24 @@ namespace Scripts.Scriptor.Conductor
                 if (resolvedPath != null)
                 {
                     return LoadFromAssemblyPath(resolvedPath);
+                }
+
+                if (_packageAssemblyMap.TryGetValue(assemblyName.Name ?? string.Empty, out var packagePath))
+                {
+                    Logger.WriteLine(Logger.LogLevel.Event, "Loading package assembly '{0}' from '{1}'", assemblyName.Name ?? "<unknown>", packagePath);
+                    return LoadFromAssemblyPath(packagePath);
+                }
+
+                var name = assemblyName.Name ?? string.Empty;
+                if (name.Length > 0 &&
+                    !name.StartsWith("System.", StringComparison.OrdinalIgnoreCase) &&
+                    !name.StartsWith("Microsoft.", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(name, "System", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(name, "mscorlib", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(name, "netstandard", StringComparison.OrdinalIgnoreCase) &&
+                    _unresolvedAssemblyNames.Add(name))
+                {
+                    Logger.WriteLine(Logger.LogLevel.Warning, "Assembly load unresolved in script context: {0}", name);
                 }
 
                 return null;

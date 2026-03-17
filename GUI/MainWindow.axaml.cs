@@ -1045,7 +1045,7 @@ namespace GUI
 
             var timeText = new TextBlock
             {
-                Text = DateTime.Now.ToString("HH:mm:ss"),
+                Text = string.Empty,
                 HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
                 VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
                 Foreground = Brushes.Gray,
@@ -1101,7 +1101,7 @@ namespace GUI
                     },
                     MessageText = new TextBlock
                     {
-                        Text = string.IsNullOrWhiteSpace(message) ? progressKey : message,
+                        Text = $"[{startedAt:HH:mm:ss}] {(string.IsNullOrWhiteSpace(message) ? progressKey : message)}",
                         TextWrapping = TextWrapping.NoWrap,
                         TextTrimming = TextTrimming.CharacterEllipsis,
                         Foreground = Brushes.Gainsboro,
@@ -1208,7 +1208,7 @@ namespace GUI
             progressBar.ElapsedText.Text = elapsed.ToString(@"mm\:ss\.fff");
             if (!string.IsNullOrWhiteSpace(message))
             {
-                progressBar.MessageText.Text = $"[{DateTime.Now:HH:mm:ss}] {message}";
+                progressBar.MessageText.Text = $"[{progressBar.StartedAt:HH:mm:ss}] {message}";
             }
 
             if (progressBar.LastDetailPercent is null || Math.Abs(clamped - progressBar.LastDetailPercent.Value) >= 10)
