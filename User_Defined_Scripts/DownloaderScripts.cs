@@ -22,8 +22,13 @@ namespace Scripts.Scripting
             [Parameter("html homme", "The HTML file to parse", @"s")]
             string url,
             [Parameter("Output Path", "The folder where the files will be downloaded too.")]
-            string path)
+            DirectoryInfo path)
         {
+            if (!path.Exists)
+            {
+                path.Create();
+            }
+
             using (var client = new WebClient())
             {
                 client.DownloadFile(url, "read.htm");
@@ -40,7 +45,7 @@ namespace Scripts.Scripting
                 if (value != null && value.EndsWith(".zip"))
                 {
                     Logger.WriteLine(Logger.LogLevel.Event, "Downloading: " + value.Trim());
-                    string pathToSave = Path.Combine(path, value);
+                    string pathToSave = Path.Combine(path.FullName, value);
                     FileInfo dlInfo = new FileInfo(pathToSave);
 
                     if (!dlInfo.Exists)

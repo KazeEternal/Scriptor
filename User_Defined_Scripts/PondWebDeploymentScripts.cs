@@ -20,13 +20,13 @@ namespace Scripts.Scripting
             [Parameter("Build with Maven", "Set true to run Maven package before copy.", "Boolean", true)]
             bool buildWithMaven,
             [Parameter("Maven Working Directory", "Folder containing pom.xml for PondWeb build.", "Path", "D:\\Development\\PondWeb\\pondweb")]
-            string mavenWorkingDirectory,
+            DirectoryInfo mavenWorkingDirectory,
             [Parameter("Maven Arguments", "Arguments passed to mvn when build is enabled.", "Examples: package | package -DskipTests", "package")]
             string mavenArguments,
             [Parameter("Source WAR Path", "Path to built WAR file to deploy.", "Path", "D:\\Development\\PondWeb\\pondweb\\target\\pondweb.war")]
-            string sourceWarPath,
+            FileInfo sourceWarPath,
             [Parameter("Destination WAR Path", "Deployment WAR path (e.g., ROOT.war on target share).", "Path", "W:\\ROOT.war")]
-            string destinationWarPath,
+            FileInfo destinationWarPath,
             [Parameter("Overwrite Destination", "Set true to overwrite destination file if present.", "Boolean", true)]
             bool overwriteDestination,
             [Parameter("Preserve Source Timestamp", "Set true to copy source timestamp to destination file.", "Boolean", true)]
@@ -42,7 +42,7 @@ namespace Scripts.Scripting
             [Parameter("SSH Password", "SSH password (optional when using key auth).", "String", "")]
             string sshPassword,
             [Parameter("SSH Private Key Path", "Path to private key file for key-based auth (optional).", "Path", "")]
-            string sshPrivateKeyPath,
+            FileInfo sshPrivateKeyPath,
             [Parameter("SSH Private Key Passphrase", "Passphrase for encrypted private key (optional).", "String", "")]
             string sshPrivateKeyPassphrase,
             [Parameter("Remote Restart Command", "Command to restart service on remote host.", "String", "sudo systemctl restart tomcat")]
@@ -54,12 +54,12 @@ namespace Scripts.Scripting
             {
                 deploymentProgress.Report(5, "Validating input paths");
 
-                if (string.IsNullOrWhiteSpace(sourceWarPath))
+                if (sourceWarPath == null)
                 {
                     throw new ArgumentException("Source WAR Path is required.");
                 }
 
-                if (string.IsNullOrWhiteSpace(destinationWarPath))
+                if (destinationWarPath == null)
                 {
                     throw new ArgumentException("Destination WAR Path is required.");
                 }
@@ -68,9 +68,9 @@ namespace Scripts.Scripting
                 {
                     deploymentProgress.Report(15, "Running Maven build");
 
-                    if (string.IsNullOrWhiteSpace(mavenWorkingDirectory) || !Directory.Exists(mavenWorkingDirectory))
+                    if (mavenWorkingDirectory == null || !mavenWorkingDirectory.Exists)
                     {
-                        throw new DirectoryNotFoundException($"Maven Working Directory not found: {mavenWorkingDirectory}");
+                        throw new DirectoryNotFoundException($"Maven Working Directory not found: {mavenWorkingDirectory?.FullName}");
                     }
 
                     RunMavenBuild(mavenWorkingDirectory, mavenArguments);
@@ -87,7 +87,7 @@ namespace Scripts.Scripting
                         sshPort,
                         sshUsername,
                         sshPassword,
-                        sshPrivateKeyPath,
+                        sshPrivateKeyPath?.FullName ?? string.Empty,
                         sshPrivateKeyPassphrase,
                         remoteRestartCommand);
                 }
@@ -95,7 +95,7 @@ namespace Scripts.Scripting
                 deploymentProgress.Report(100, "Deploy complete");
 
                 Logger.WriteLine(Logger.LogLevel.Event, "Pond Web deploy complete.");
-                Logger.WriteLine(Logger.LogLevel.Event, "  Source      : {0}", sourceWarPath);
+                Logger.WriteLine(Logger.LogLevel.Event, "  Source      : {0}", sourceWarPath.FullName);
                 Logger.WriteLine(Logger.LogLevel.Event, "  Destination : {0}", copiedInfo.FullName);
                 Logger.WriteLine(Logger.LogLevel.Event, "  Size (bytes): {0}", copiedInfo.Length);
                 Logger.WriteLine(Logger.LogLevel.Event, "  LastWriteUtc: {0:O}", copiedInfo.LastWriteTimeUtc);
@@ -119,9 +119,9 @@ namespace Scripts.Scripting
         public static void CopyPondWebWarOnly(
             IScriptContext context,
             [Parameter("Source WAR Path", "Path to built WAR file to deploy.", "Path", "D:\\Development\\PondWeb\\pondweb\\target\\pondweb.war")]
-            string sourceWarPath,
+            FileInfo sourceWarPath,
             [Parameter("Destination WAR Path", "Deployment WAR path (e.g., ROOT.war on target share).", "Path", "W:\\ROOT.war")]
-            string destinationWarPath,
+            FileInfo destinationWarPath,
             [Parameter("Overwrite Destination", "Set true to overwrite destination file if present.", "Boolean", true)]
             bool overwriteDestination,
             [Parameter("Preserve Source Timestamp", "Set true to copy source timestamp to destination file.", "Boolean", true)]
@@ -137,7 +137,7 @@ namespace Scripts.Scripting
             [Parameter("SSH Password", "SSH password (optional when using key auth).", "String", "")]
             string sshPassword,
             [Parameter("SSH Private Key Path", "Path to private key file for key-based auth (optional).", "Path", "")]
-            string sshPrivateKeyPath,
+            FileInfo sshPrivateKeyPath,
             [Parameter("SSH Private Key Passphrase", "Passphrase for encrypted private key (optional).", "String", "")]
             string sshPrivateKeyPassphrase,
             [Parameter("Remote Restart Command", "Command to restart service on remote host.", "String", "sudo systemctl restart tomcat")]
@@ -158,7 +158,7 @@ namespace Scripts.Scripting
                         sshPort,
                         sshUsername,
                         sshPassword,
-                        sshPrivateKeyPath,
+                        sshPrivateKeyPath?.FullName ?? string.Empty,
                         sshPrivateKeyPassphrase,
                         remoteRestartCommand);
                 }
@@ -166,7 +166,7 @@ namespace Scripts.Scripting
                 copyProgress.Report(100, "Copy complete");
 
                 Logger.WriteLine(Logger.LogLevel.Event, "Pond Web copy-only deploy complete.");
-                Logger.WriteLine(Logger.LogLevel.Event, "  Source      : {0}", sourceWarPath);
+                Logger.WriteLine(Logger.LogLevel.Event, "  Source      : {0}", sourceWarPath.FullName);
                 Logger.WriteLine(Logger.LogLevel.Event, "  Destination : {0}", copiedInfo.FullName);
                 Logger.WriteLine(Logger.LogLevel.Event, "  Size (bytes): {0}", copiedInfo.Length);
                 Logger.WriteLine(Logger.LogLevel.Event, "  LastWriteUtc: {0:O}", copiedInfo.LastWriteTimeUtc);
@@ -217,22 +217,22 @@ namespace Scripts.Scripting
         }
 
         private static FileInfo CopyWarArtifact(
-            string sourceWarPath,
-            string destinationWarPath,
+            FileInfo sourceWarPath,
+            FileInfo destinationWarPath,
             bool overwriteDestination,
             bool preserveSourceTimestamp)
         {
-            var sourceInfo = new FileInfo(sourceWarPath);
+            var sourceInfo = sourceWarPath;
             if (!sourceInfo.Exists)
             {
-                throw new FileNotFoundException("Source WAR file not found.", sourceWarPath);
+                throw new FileNotFoundException("Source WAR file not found.", sourceWarPath.FullName);
             }
 
-            var destinationInfo = new FileInfo(destinationWarPath);
+            var destinationInfo = destinationWarPath;
             var destinationDirectory = destinationInfo.DirectoryName;
             if (string.IsNullOrWhiteSpace(destinationDirectory))
             {
-                throw new InvalidOperationException($"Unable to resolve destination directory for {destinationWarPath}");
+                throw new InvalidOperationException($"Unable to resolve destination directory for {destinationWarPath.FullName}");
             }
 
             if (!Directory.Exists(destinationDirectory))
@@ -242,20 +242,20 @@ namespace Scripts.Scripting
 
             if (destinationInfo.Exists && !overwriteDestination)
             {
-                throw new IOException($"Destination exists and Overwrite Destination is false: {destinationWarPath}");
+                throw new IOException($"Destination exists and Overwrite Destination is false: {destinationWarPath.FullName}");
             }
 
-            File.Copy(sourceWarPath, destinationWarPath, overwriteDestination);
+            File.Copy(sourceWarPath.FullName, destinationWarPath.FullName, overwriteDestination);
 
             if (preserveSourceTimestamp)
             {
-                File.SetLastWriteTimeUtc(destinationWarPath, sourceInfo.LastWriteTimeUtc);
+                File.SetLastWriteTimeUtc(destinationWarPath.FullName, sourceInfo.LastWriteTimeUtc);
             }
 
-            return new FileInfo(destinationWarPath);
+            return new FileInfo(destinationWarPath.FullName);
         }
 
-        private static void RunMavenBuild(string workingDirectory, string arguments)
+        private static void RunMavenBuild(DirectoryInfo workingDirectory, string arguments)
         {
             var args = string.IsNullOrWhiteSpace(arguments) ? "package" : arguments.Trim();
 
@@ -263,7 +263,7 @@ namespace Scripts.Scripting
             {
                 FileName = fileName,
                 Arguments = args,
-                WorkingDirectory = workingDirectory,
+                WorkingDirectory = workingDirectory.FullName,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,

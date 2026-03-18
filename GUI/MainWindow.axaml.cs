@@ -1,12 +1,15 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
@@ -353,15 +356,7 @@ namespace GUI
                         : $"{vm.Description}\nUsage: {vm.Usage}";
                 };
 
-                var input = new TextBox { Text = vm.Value };
-                input.LostFocus += (_, _) => SaveParameter(vm, input.Text);
-                input.KeyDown += (_, e) =>
-                {
-                    if (e.Key == Key.Enter)
-                    {
-                        SaveParameter(vm, input.Text);
-                    }
-                };
+                var input = CreateParameterEditor(parameter, vm);
 
                 Grid.SetColumn(nameBox, 0);
                 Grid.SetColumn(input, 1);
@@ -369,6 +364,303 @@ namespace GUI
                 row.Children.Add(input);
                 _parameterPanel.Children.Add(row);
             }
+        }
+
+        private Control CreateParameterEditor(ScriptParameterDescriptor parameter, ParameterViewModel vm)
+        {
+            var parameterType = Nullable.GetUnderlyingType(parameter.ParameterType) ?? parameter.ParameterType;
+            var usage = vm.Usage ?? string.Empty;
+
+            if (parameterType == typeof(FileInfo) || HasUiHint(usage, "file"))
+            {
+                return CreatePathEditor(vm, isDirectory: false);
+            }
+
+            if (parameterType == typeof(DirectoryInfo) || HasUiHint(usage, "folder") || HasUiHint(usage, "directory"))
+            {
+                return CreatePathEditor(vm, isDirectory: true);
+            }
+
+            if (HasUiHint(usage, "password"))
+            {
+                var password = new TextBox
+                {
+                    Text = vm.Value ?? string.Empty,
+                    PasswordChar = '●',
+                };
+
+                password.LostFocus += (_, _) => SaveParameter(vm, password.Text);
+                password.PropertyChanged += (_, e) =>
+                {
+                    if (e.Property == TextBox.TextProperty)
+                    {
+                        SaveParameter(vm, password.Text);
+                    }
+                };
+                return password;
+            }
+
+            if (parameterType == typeof(bool))
+            {
+                var checkBox = new CheckBox
+                {
+                    IsChecked = bool.TryParse(vm.Value, out var parsed) && parsed,
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                };
+
+                checkBox.IsCheckedChanged += (_, _) => SaveParameter(vm, checkBox.IsChecked == true ? bool.TrueString : bool.FalseString);
+                return checkBox;
+            }
+
+            if (parameterType.IsEnum)
+            {
+                var options = Enum.GetNames(parameterType);
+                var combo = new ComboBox
+                {
+                    ItemsSource = options,
+                    SelectedItem = options.FirstOrDefault(o => string.Equals(o, vm.Value, StringComparison.OrdinalIgnoreCase)) ?? options.FirstOrDefault(),
+                };
+
+                combo.SelectionChanged += (_, _) => SaveParameter(vm, combo.SelectedItem?.ToString());
+                return combo;
+            }
+
+            if (IsNumericType(parameterType))
+            {
+                var isInteger = IsIntegerType(parameterType);
+
+                if (TryParseSliderHint(usage, out var sliderMin, out var sliderMax, out var sliderStep))
+                {
+                    var slider = new Slider
+                    {
+                        Minimum = sliderMin,
+                        Maximum = sliderMax,
+                        TickFrequency = sliderStep,
+                        IsSnapToTickEnabled = isInteger,
+                    };
+
+                    if (double.TryParse(vm.Value, global::System.Globalization.NumberStyles.Any, global::System.Globalization.CultureInfo.InvariantCulture, out var sliderParsed) ||
+                        double.TryParse(vm.Value, global::System.Globalization.NumberStyles.Any, global::System.Globalization.CultureInfo.CurrentCulture, out sliderParsed))
+                    {
+                        slider.Value = Math.Max(sliderMin, Math.Min(sliderMax, sliderParsed));
+                    }
+
+                    var valueText = new TextBlock
+                    {
+                        Text = isInteger
+                            ? Math.Round(slider.Value).ToString(global::System.Globalization.CultureInfo.InvariantCulture)
+                            : slider.Value.ToString("0.###", global::System.Globalization.CultureInfo.InvariantCulture),
+                        HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                        VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                    };
+
+                    void SaveSlider()
+                    {
+                        var value = isInteger ? Math.Round(slider.Value) : slider.Value;
+                        valueText.Text = isInteger
+                            ? value.ToString(global::System.Globalization.CultureInfo.InvariantCulture)
+                            : value.ToString("0.###", global::System.Globalization.CultureInfo.InvariantCulture);
+                        SaveParameter(vm, valueText.Text);
+                    }
+
+                    slider.PropertyChanged += (_, e) =>
+                    {
+                        if (e.Property == RangeBase.ValueProperty)
+                        {
+                            SaveSlider();
+                        }
+                    };
+
+                    var sliderGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,70") };
+                    Grid.SetColumn(slider, 0);
+                    Grid.SetColumn(valueText, 1);
+                    sliderGrid.Children.Add(slider);
+                    sliderGrid.Children.Add(valueText);
+                    return sliderGrid;
+                }
+
+                var numeric = new NumericUpDown
+                {
+                    Increment = isInteger ? 1m : 0.1m,
+                    Minimum = decimal.MinValue,
+                    Maximum = decimal.MaxValue,
+                    FormatString = isInteger ? "N0" : "N3",
+                };
+
+                if (decimal.TryParse(vm.Value, global::System.Globalization.NumberStyles.Any, global::System.Globalization.CultureInfo.InvariantCulture, out var parsed) ||
+                    decimal.TryParse(vm.Value, global::System.Globalization.NumberStyles.Any, global::System.Globalization.CultureInfo.CurrentCulture, out parsed))
+                {
+                    numeric.Value = parsed;
+                }
+
+                void SaveNumeric()
+                {
+                    if (numeric.Value is null)
+                    {
+                        SaveParameter(vm, string.Empty);
+                        return;
+                    }
+
+                    var value = numeric.Value.Value;
+                    SaveParameter(vm, isInteger
+                        ? decimal.Truncate(value).ToString(global::System.Globalization.CultureInfo.InvariantCulture)
+                        : value.ToString(global::System.Globalization.CultureInfo.InvariantCulture));
+                }
+
+                numeric.LostFocus += (_, _) => SaveNumeric();
+                numeric.ValueChanged += (_, _) => SaveNumeric();
+                return numeric;
+            }
+
+            var multiline = HasUiHint(usage, "multiline");
+            var textBox = new TextBox
+            {
+                Text = vm.Value,
+                AcceptsReturn = multiline,
+                Height = multiline ? 72 : double.NaN,
+                TextWrapping = multiline ? TextWrapping.Wrap : TextWrapping.NoWrap,
+            };
+
+            textBox.LostFocus += (_, _) => SaveParameter(vm, textBox.Text);
+            textBox.KeyDown += (_, e) =>
+            {
+                if (!multiline && e.Key == Key.Enter)
+                {
+                    SaveParameter(vm, textBox.Text);
+                }
+            };
+
+            return textBox;
+        }
+
+        private Control CreatePathEditor(ParameterViewModel vm, bool isDirectory)
+        {
+            var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+            var textBox = new TextBox { Text = vm.Value };
+            var browseButton = new Button
+            {
+                Content = isDirectory ? "Browse Folder" : "Browse File",
+                Margin = new Avalonia.Thickness(8, 0, 0, 0),
+            };
+
+            textBox.LostFocus += (_, _) => SaveParameter(vm, textBox.Text);
+            textBox.KeyDown += (_, e) =>
+            {
+                if (e.Key == Key.Enter)
+                {
+                    SaveParameter(vm, textBox.Text);
+                }
+            };
+
+            browseButton.Click += async (_, _) =>
+            {
+                if (isDirectory)
+                {
+                    var dialog = new OpenFolderDialog { Title = vm.Name };
+                    var selected = await dialog.ShowAsync(this);
+                    if (!string.IsNullOrWhiteSpace(selected))
+                    {
+                        textBox.Text = selected;
+                        SaveParameter(vm, selected);
+                    }
+                }
+                else
+                {
+                    var dialog = new OpenFileDialog { Title = vm.Name, AllowMultiple = false };
+                    var selected = await dialog.ShowAsync(this);
+                    if (selected != null && selected.Length > 0 && !string.IsNullOrWhiteSpace(selected[0]))
+                    {
+                        textBox.Text = selected[0];
+                        SaveParameter(vm, selected[0]);
+                    }
+                }
+            };
+
+            Grid.SetColumn(textBox, 0);
+            Grid.SetColumn(browseButton, 1);
+            grid.Children.Add(textBox);
+            grid.Children.Add(browseButton);
+            return grid;
+        }
+
+        private static bool HasUiHint(string usage, string hint)
+        {
+            return usage?.IndexOf($"ui:{hint}", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool TryParseSliderHint(string usage, out double min, out double max, out double step)
+        {
+            min = 0;
+            max = 100;
+            step = 1;
+
+            if (string.IsNullOrWhiteSpace(usage))
+            {
+                return false;
+            }
+
+            var match = Regex.Match(
+                usage,
+                "ui:slider\\((?<min>-?\\d+(?:\\.\\d+)?),(?<max>-?\\d+(?:\\.\\d+)?)(?:,(?<step>\\d+(?:\\.\\d+)?))?\\)",
+                RegexOptions.IgnoreCase);
+
+            if (!match.Success)
+            {
+                return false;
+            }
+
+            if (!double.TryParse(match.Groups["min"].Value, NumberStyles.Any, CultureInfo.InvariantCulture, out min) ||
+                !double.TryParse(match.Groups["max"].Value, NumberStyles.Any, CultureInfo.InvariantCulture, out max))
+            {
+                return false;
+            }
+
+            if (match.Groups["step"].Success)
+            {
+                if (!double.TryParse(match.Groups["step"].Value, NumberStyles.Any, CultureInfo.InvariantCulture, out step))
+                {
+                    step = 1;
+                }
+            }
+
+            if (max <= min)
+            {
+                max = min + 1;
+            }
+
+            if (step <= 0)
+            {
+                step = 1;
+            }
+
+            return true;
+        }
+
+        private static bool IsNumericType(Type type)
+        {
+            return type == typeof(byte)
+                || type == typeof(sbyte)
+                || type == typeof(short)
+                || type == typeof(ushort)
+                || type == typeof(int)
+                || type == typeof(uint)
+                || type == typeof(long)
+                || type == typeof(ulong)
+                || type == typeof(float)
+                || type == typeof(double)
+                || type == typeof(decimal);
+        }
+
+        private static bool IsIntegerType(Type type)
+        {
+            return type == typeof(byte)
+                || type == typeof(sbyte)
+                || type == typeof(short)
+                || type == typeof(ushort)
+                || type == typeof(int)
+                || type == typeof(uint)
+                || type == typeof(long)
+                || type == typeof(ulong);
         }
 
         private void SaveParameter(ParameterViewModel vm, string? newValue)
@@ -623,6 +915,36 @@ namespace GUI
             if (type == typeof(double) && double.TryParse(value, out var d))
             {
                 output = d;
+                return true;
+            }
+
+            if (type == typeof(float) && float.TryParse(value, out var f))
+            {
+                output = f;
+                return true;
+            }
+
+            if (type == typeof(decimal) && decimal.TryParse(value, out var dec))
+            {
+                output = dec;
+                return true;
+            }
+
+            if (type == typeof(long) && long.TryParse(value, out var l))
+            {
+                output = l;
+                return true;
+            }
+
+            if (type == typeof(FileInfo))
+            {
+                output = string.IsNullOrWhiteSpace(value) ? null : new FileInfo(value);
+                return true;
+            }
+
+            if (type == typeof(DirectoryInfo))
+            {
+                output = string.IsNullOrWhiteSpace(value) ? null : new DirectoryInfo(value);
                 return true;
             }
 

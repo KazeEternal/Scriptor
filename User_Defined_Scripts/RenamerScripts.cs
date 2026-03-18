@@ -25,9 +25,9 @@ namespace Scripts.Scripting
             [Parameter("Episode Starting Number", "The Episode Number to start with.", "The value must be from 0 to N")]
             int episodeStartingNumber,
             [Parameter("Folder Path", "The folder where the files live.")]
-            string path)
+            DirectoryInfo path)
         {
-            DirectoryInfo dInfo = new DirectoryInfo(path);
+            DirectoryInfo dInfo = path;
 
             if (dInfo.Exists)
             {
@@ -58,9 +58,9 @@ namespace Scripts.Scripting
             [Parameter("Season Number", "The Season of the show that the file will be using", "The Numerical Value of the season. Value must be between 0 <-> 9999", 1)]
             int seasonNumber,
             [Parameter("Folder Path", "The folder where the files live.")]
-            string path)
+            DirectoryInfo path)
         {
-            DirectoryInfo dInfo = new DirectoryInfo(path);
+            DirectoryInfo dInfo = path;
 
             if (dInfo.Exists)
             {
@@ -100,9 +100,9 @@ namespace Scripts.Scripting
             [Parameter("Show Name", "The Name of the Show to Use", "This will prefix the name of the show on the files name.", "New Show")]
             string showName,
             [Parameter("Folder Path", "The folder where the files live.")]
-            string path)
+            DirectoryInfo path)
         {
-            DirectoryInfo dInfo = new DirectoryInfo(path);
+            DirectoryInfo dInfo = path;
 
             if (dInfo.Exists)
             {
@@ -132,11 +132,11 @@ namespace Scripts.Scripting
             [Parameter("Season Number", "The Season of the show that the file will be using", "The Numerical Value of the season. Value must be between 0 <-> 9999", 1)]
             int seasonNumber,
             [Parameter("Folder Path", "The folder where the files live.")]
-            string path,
+            DirectoryInfo path,
             [Parameter("Offset by N", "The number of episodes starting from n to n+1 from")]
             int offset)
         {
-            DirectoryInfo dInfo = new DirectoryInfo(path);
+            DirectoryInfo dInfo = path;
 
             if (dInfo.Exists)
             {
@@ -185,9 +185,9 @@ namespace Scripts.Scripting
         public static void RenameShowByTruncatingDecimal(
             IScriptContext context,
             [Parameter("Folder Path", "The folder where the files live.")]
-            string path)
+            DirectoryInfo path)
         {
-            DirectoryInfo dInfo = new DirectoryInfo(path);
+            DirectoryInfo dInfo = path;
 
             if (dInfo.Exists)
             {
@@ -217,13 +217,13 @@ namespace Scripts.Scripting
         public static void RenameExtensionToNewExtension(
             IScriptContext context,
             [Parameter("Folder Path", "The Folder wehre the files live.")]
-            string path,
+            DirectoryInfo path,
             [Parameter("Old Extension", "the Extension to replace")]
             string oldExtension,
             [Parameter("New Extension", "The new extension to use")]
             string newExtension)
         {
-            DirectoryInfo dInfo = new DirectoryInfo(path);
+            DirectoryInfo dInfo = path;
 
             if (dInfo.Exists)
             {

@@ -17,7 +17,7 @@ namespace Scripts.Scripting
         public static void DumpFilesByExtensionToFile(
            IScriptContext context,
            [Parameter("Folder Path", "The path of the directory to parse over")]
-            string pathFolder,
+            DirectoryInfo pathFolder,
            [Parameter("Extensions", "The Extension of the files.")]
             string extension,
            [Parameter("Output File Path", "The file to be written too.")]
@@ -25,13 +25,13 @@ namespace Scripts.Scripting
            [Parameter("Invert", "Not that extension", "set to true if you want to not have files with that extension",false)]
             bool invert)
         {
-            if (string.IsNullOrWhiteSpace(pathFolder))
+            if (pathFolder == null)
             {
                 Console.WriteLine("Path Folder is null or empty string, unable to parse.");
                 return;
             }
 
-            DirectoryInfo directoryInfo = new DirectoryInfo(pathFolder);
+            DirectoryInfo directoryInfo = pathFolder;
 
             TextWriter output;
             bool cleanUp = false;

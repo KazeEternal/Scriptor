@@ -19,9 +19,9 @@ namespace Scripts.Scripting
            [Parameter("link to the keydb.cfg", "the home of the file to download", @"s", "http://fvonline-db.bplaced.net/fv_download.php?lang=eng")]
             string url,
            [Parameter("Output Path", "The location to place the cfg file.", "s", "C:\\Users\\Kyle Peplow\\.MakeMKV")]
-            string installPath,
+            DirectoryInfo installPath,
            [Parameter("Download Path", "The location to download the archive to", "s", "D:\\Downloads\\keydb.cfg.zip")]
-            string downloadPath)
+            FileInfo downloadPath)
         {
             try
             {
@@ -35,14 +35,20 @@ namespace Scripts.Scripting
                 var extractTask = context.CreateProgressChannel("Extract keydb archive");
                 extractTask.Report(15, "Preparing extraction");
 
-                if (File.Exists(Path.Combine(installPath, "keydb.cfg")))
+                if (!installPath.Exists)
+                {
+                    installPath.Create();
+                }
+
+                var keyDbPath = Path.Combine(installPath.FullName, "keydb.cfg");
+                if (File.Exists(keyDbPath))
                 {
                     extractTask.Report(40, "Removing existing keydb.cfg");
-                    File.Delete(Path.Combine(installPath, "keydb.cfg"));
+                    File.Delete(keyDbPath);
                 }
 
                 extractTask.Report(70, "Extracting archive");
-                ZipFile.ExtractToDirectory(downloadPath, installPath, overwriteFiles: true);
+                ZipFile.ExtractToDirectory(downloadPath.FullName, installPath.FullName, overwriteFiles: true);
                 extractTask.Complete("Extraction complete");
                 Logger.WriteLine(Logger.LogLevel.Event, "Extraction complete!");
             }
@@ -56,7 +62,7 @@ namespace Scripts.Scripting
             context.IsSuccess = true;
         }
 
-        private static async Task DownloadWithProgressAsync(string url, string dest, ScriptProgressChannel progress, CancellationToken ct)
+        private static async Task DownloadWithProgressAsync(string url, FileInfo dest, ScriptProgressChannel progress, CancellationToken ct)
         {
             using var http = new HttpClient();
             using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
@@ -64,7 +70,12 @@ namespace Scripts.Scripting
 
             var contentLength = response.Content.Headers.ContentLength ?? -1L;
             await using var source = await response.Content.ReadAsStreamAsync(ct);
-            await using var destination = File.Create(dest);
+            if (dest.Directory != null && !dest.Directory.Exists)
+            {
+                dest.Directory.Create();
+            }
+
+            await using var destination = File.Create(dest.FullName);
 
             var buffer = new byte[64 * 1024];
             long totalRead = 0;
