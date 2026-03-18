@@ -1,6 +1,7 @@
 using Scripts.Scriptor;
 using Scripts.Scriptor.Attributor;
 using System;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,6 +12,13 @@ namespace Scripts.Scripting
     [ScriptCollectionDescription("Routines to validate run log rows, status transitions, failures, and progress bar behavior.")]
     public class FeatureValidationScripts : IScriptCollection
     {
+        public enum DemoMode
+        {
+            Fast,
+            Balanced,
+            Safe,
+        }
+
         [ScriptRoutine("Progress Demo (Single)", "Runs a single-threaded progress loop and emits status messages.")]
         public static void ProgressDemoSingle(
             IScriptContext context,
@@ -102,6 +110,36 @@ namespace Scripts.Scripting
                     throw new InvalidOperationException($"Intentional test failure at {pct}%");
                 }
             }
+        }
+
+        [ScriptRoutine("Parameter UI Demo", "Demonstrates typed parameter editors: checkbox, enum dropdown, numeric, slider, file/folder picker, password, and multiline text.")]
+        public static void ParameterUiDemo(
+            IScriptContext context,
+            [Parameter("Enable Feature", "Boolean demo parameter.", "ui:checkbox", true)] bool enableFeature,
+            [Parameter("Mode", "Enum demo parameter.", "Dropdown enum selection", DemoMode.Balanced)] DemoMode mode,
+            [Parameter("Retry Count", "Integer demo parameter.", "Numeric editor", 3)] int retryCount,
+            [Parameter("Threshold", "Decimal demo parameter.", "ui:slider(0,1,0.05)", 0.7)] decimal threshold,
+            [Parameter("Timeout Seconds", "Long demo parameter.", "Numeric editor", 30L)] long timeoutSeconds,
+            [Parameter("Source File", "File picker demo parameter.", "ui:file", "D:\\Temp\\input.txt")] FileInfo sourceFile,
+            [Parameter("Output Folder", "Folder picker demo parameter.", "ui:folder", "D:\\Temp")] DirectoryInfo outputFolder,
+            [Parameter("Api Key", "Password-mask demo parameter.", "ui:password", "")]
+            string apiKey,
+            [Parameter("Notes", "Multiline text demo parameter.", "ui:multiline", "Enter notes here...")]
+            string notes)
+        {
+            var task = context.CreateProgressChannel("Parameter UI Demo");
+            task.Report(100, "Captured parameter values");
+
+            Logger.WriteLine(Logger.LogLevel.Event, "UI Demo Values:");
+            Logger.WriteLine(Logger.LogLevel.Event, "  Enable Feature : {0}", enableFeature);
+            Logger.WriteLine(Logger.LogLevel.Event, "  Mode           : {0}", mode);
+            Logger.WriteLine(Logger.LogLevel.Event, "  Retry Count    : {0}", retryCount);
+            Logger.WriteLine(Logger.LogLevel.Event, "  Threshold      : {0}", threshold);
+            Logger.WriteLine(Logger.LogLevel.Event, "  Timeout Seconds: {0}", timeoutSeconds);
+            Logger.WriteLine(Logger.LogLevel.Event, "  Source File    : {0}", sourceFile?.FullName ?? "<null>");
+            Logger.WriteLine(Logger.LogLevel.Event, "  Output Folder  : {0}", outputFolder?.FullName ?? "<null>");
+            Logger.WriteLine(Logger.LogLevel.Event, "  Api Key Length : {0}", string.IsNullOrEmpty(apiKey) ? 0 : apiKey.Length);
+            Logger.WriteLine(Logger.LogLevel.Event, "  Notes Length   : {0}", string.IsNullOrEmpty(notes) ? 0 : notes.Length);
         }
     }
 }
