@@ -473,6 +473,12 @@ namespace Scripts
                 return Path.GetFullPath(options.ScriptsRoot);
             }
 
+            var settings = new SettingsService(SettingsService.GetDefaultSettingsPath());
+            if (!string.IsNullOrWhiteSpace(settings.ScriptsRoot))
+            {
+                return Path.GetFullPath(settings.ScriptsRoot);
+            }
+
             return Path.Combine(AppContext.BaseDirectory, "Scripts");
         }
 

@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Text.Json;
 
-namespace GUI
+namespace Scripts.Scriptor.Conductor
 {
     public sealed class SettingsService
     {
@@ -37,6 +37,42 @@ namespace GUI
         {
             var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             return Path.Combine(appData, "Scriptor", "scriptor-settings.json");
+        }
+
+        public string? GetValue(string key)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return null;
+            }
+
+            return Current.Values.TryGetValue(key, out var value) ? value : null;
+        }
+
+        public void SetValue(string key, string? value)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return;
+            }
+
+            if (value == null)
+            {
+                if (Current.Values.Remove(key))
+                {
+                    Save();
+                }
+
+                return;
+            }
+
+            if (Current.Values.TryGetValue(key, out var existing) && string.Equals(existing, value, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            Current.Values[key] = value;
+            Save();
         }
 
         public void Save()

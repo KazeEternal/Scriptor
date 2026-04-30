@@ -66,6 +66,7 @@ namespace GUI
         public MainWindow()
         {
             _settingsService = new SettingsService(SettingsService.GetDefaultSettingsPath());
+            _scriptsRoot = Path.GetFullPath(ResolveScriptsRoot(_settingsService.Current));
             InitializeComponent();
 
             RestoreWindowState();
@@ -87,9 +88,6 @@ namespace GUI
 
             _statusSpinnerTimer.Tick += StatusSpinnerTimer_Tick;
             _statusSpinnerTimer.Start();
-
-            _runtime.StartWatching();
-            _runtime.ReloadScripts();
         }
 
         private void InitializeComponent()
@@ -1160,7 +1158,7 @@ namespace GUI
             return (routine.Method.DeclaringType?.FullName ?? "<unknown>") + "." + routine.Method.Name;
         }
 
-        private static Dictionary<string, Dictionary<string, string>> LoadDefaultsFile()
+        private Dictionary<string, Dictionary<string, string>> LoadDefaultsFile()
         {
             try
             {
@@ -1179,7 +1177,7 @@ namespace GUI
             }
         }
 
-        private static void SaveDefaultsFile(Dictionary<string, Dictionary<string, string>> defaults)
+        private void SaveDefaultsFile(Dictionary<string, Dictionary<string, string>> defaults)
         {
             var path = GetDefaultsPath();
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -1187,11 +1185,9 @@ namespace GUI
             File.WriteAllText(path, json);
         }
 
-        private static string GetDefaultsPath()
+        private string GetDefaultsPath()
         {
-            var settings = new SettingsService(SettingsService.GetDefaultSettingsPath()).Current;
-            var scriptsRoot = ResolveScriptsRoot(settings);
-            return Path.Combine(scriptsRoot, ".scriptor", "defaults.json");
+            return Path.Combine(_scriptsRoot, ".scriptor", "defaults.json");
         }
 
         private static string ResolveScriptsRoot(AppSettings settings)
@@ -1219,18 +1215,14 @@ namespace GUI
             return outputScripts;
         }
 
-        private static string GetPlaylistsPath()
+        private string GetPlaylistsPath()
         {
-            var settings = new SettingsService(SettingsService.GetDefaultSettingsPath()).Current;
-            var scriptsRoot = ResolveScriptsRoot(settings);
-            return Path.Combine(scriptsRoot, ".scriptor", "playlists.json");
+            return Path.Combine(_scriptsRoot, ".scriptor", "playlists.json");
         }
 
-        private static string GetWindowStatePath()
+        private string GetWindowStatePath()
         {
-            var settings = new SettingsService(SettingsService.GetDefaultSettingsPath()).Current;
-            var scriptsRoot = ResolveScriptsRoot(settings);
-            return Path.Combine(scriptsRoot, ".scriptor", "window-state.json");
+            return Path.Combine(_scriptsRoot, ".scriptor", "window-state.json");
         }
 
         private void RestoreWindowState()
@@ -1302,7 +1294,7 @@ namespace GUI
             }
         }
 
-        private static List<PlaylistDefinition> LoadPlaylists()
+        private List<PlaylistDefinition> LoadPlaylists()
         {
             try
             {
@@ -1321,7 +1313,7 @@ namespace GUI
             }
         }
 
-        private static void SavePlaylists(List<PlaylistDefinition> playlists)
+        private void SavePlaylists(List<PlaylistDefinition> playlists)
         {
             var path = GetPlaylistsPath();
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
