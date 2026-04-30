@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -22,7 +23,7 @@ namespace GUI
 {
     public sealed partial class MainWindow : Window
     {
-        private readonly ScriptRuntimeService _runtime;
+        private ScriptRuntimeService _runtime = null!;
         private readonly List<ParameterViewModel> _parameterViewModels = new();
         private readonly ObservableCollection<ScriptNode> _treeNodes = new();
         private readonly Dictionary<string, ScriptRoutineDescriptor> _routinesById = new(StringComparer.OrdinalIgnoreCase);
@@ -48,17 +49,23 @@ namespace GUI
         private Button _newPlaylistButton = null!;
         private Button _addToPlaylistButton = null!;
         private Button _generateProjectButton = null!;
+        private Button _settingsButton = null!;
         private Button _runSelectedButton = null!;
         private TextBlock _scriptPathStatus = null!;
+        private Border _compilationWarningBanner = null!;
+        private TextBlock _compilationWarningBannerText = null!;
         private StackPanel _runLogRowsPanel = null!;
         private ScrollViewer _runLogScrollViewer = null!;
 
         private ScriptRoutineDescriptor? _currentRoutine;
         private ScriptNode? _selectedNode;
         private Action<List<ParameterViewModel>>? _saveDefaultsAction;
+        private string _scriptsRoot = string.Empty;
+        private readonly SettingsService _settingsService;
 
         public MainWindow()
         {
+            _settingsService = new SettingsService(SettingsService.GetDefaultSettingsPath());
             InitializeComponent();
 
             RestoreWindowState();
@@ -68,16 +75,13 @@ namespace GUI
             _newPlaylistButton.Click += NewPlaylistButton_Click;
             _addToPlaylistButton.Click += AddToPlaylistButton_Click;
             _generateProjectButton.Click += GenerateProjectButton_Click;
+            _settingsButton.Click += SettingsButton_Click;
             _runSelectedButton.Click += RunButton_Click;
             _collectionsTree.SelectionChanged += CollectionsTree_SelectionChanged;
+            _settingsService.SettingsChanged += SettingsService_SettingsChanged;
 
-            var scriptsRoot = ResolveScriptsRoot();
-            Logger.ConfigureFileLogging(scriptsRoot);
-            Title = $"Scriptor GUI - {scriptsRoot}";
-            _scriptPathStatus.Text = $"Scripts path: {scriptsRoot}";
-            _runtime = new ScriptRuntimeService(scriptsRoot);
-            _runtime.ScriptsReloaded += Runtime_ScriptsReloaded;
-            _runtime.CompilationFailed += Runtime_CompilationFailed;
+            var scriptsRoot = ResolveScriptsRoot(_settingsService.Current);
+            InitializeRuntime(scriptsRoot);
 
             Logger.EntryWritten += Logger_EntryWritten;
 
@@ -100,10 +104,75 @@ namespace GUI
             _newPlaylistButton = this.FindControl<Button>("NewPlaylistButton") ?? throw new InvalidOperationException("NewPlaylistButton not found.");
             _addToPlaylistButton = this.FindControl<Button>("AddToPlaylistButton") ?? throw new InvalidOperationException("AddToPlaylistButton not found.");
             _generateProjectButton = this.FindControl<Button>("GenerateProjectButton") ?? throw new InvalidOperationException("GenerateProjectButton not found.");
+            _settingsButton = this.FindControl<Button>("SettingsButton") ?? throw new InvalidOperationException("SettingsButton not found.");
             _runSelectedButton = this.FindControl<Button>("RunSelectedButton") ?? throw new InvalidOperationException("RunSelectedButton not found.");
             _scriptPathStatus = this.FindControl<TextBlock>("ScriptPathStatus") ?? throw new InvalidOperationException("ScriptPathStatus not found.");
+            _compilationWarningBanner = this.FindControl<Border>("CompilationWarningBanner") ?? throw new InvalidOperationException("CompilationWarningBanner not found.");
+            _compilationWarningBannerText = this.FindControl<TextBlock>("CompilationWarningBannerText") ?? throw new InvalidOperationException("CompilationWarningBannerText not found.");
             _runLogRowsPanel = this.FindControl<StackPanel>("RunLogRowsPanel") ?? throw new InvalidOperationException("RunLogRowsPanel not found.");
             _runLogScrollViewer = this.FindControl<ScrollViewer>("RunLogScrollViewer") ?? throw new InvalidOperationException("RunLogScrollViewer not found.");
+        }
+
+        private void InitializeRuntime(string scriptsRoot)
+        {
+            var normalizedScriptsRoot = Path.GetFullPath(scriptsRoot);
+            Directory.CreateDirectory(normalizedScriptsRoot);
+
+            if (_runtime != null)
+            {
+                _runtime.ScriptsReloaded -= Runtime_ScriptsReloaded;
+                _runtime.CompilationFailed -= Runtime_CompilationFailed;
+                _runtime.Dispose();
+            }
+
+            _scriptsRoot = normalizedScriptsRoot;
+            Logger.ConfigureFileLogging(_scriptsRoot);
+            Title = $"Scriptor GUI - {_scriptsRoot}";
+            _scriptPathStatus.Text = $"Scripts path: {_scriptsRoot}";
+
+            _runtime = new ScriptRuntimeService(_scriptsRoot);
+            _runtime.ScriptsReloaded += Runtime_ScriptsReloaded;
+            _runtime.CompilationFailed += Runtime_CompilationFailed;
+            _runtime.StartWatching();
+            _runtime.ReloadScripts();
+        }
+
+        private async void SettingsButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+        {
+            var dialog = new SettingsWindow(_scriptsRoot, ApplyScriptsPathSetting);
+            await dialog.ShowDialog<bool>(this);
+        }
+
+        private void ApplyScriptsPathSetting(string selectedScriptsPath)
+        {
+            if (string.IsNullOrWhiteSpace(selectedScriptsPath))
+            {
+                return;
+            }
+
+            var normalized = Path.GetFullPath(selectedScriptsPath);
+            if (string.Equals(_scriptsRoot, normalized, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            _settingsService.ScriptsRoot = normalized;
+        }
+
+        private void SettingsService_SettingsChanged(object? sender, AppSettings settings)
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                var resolvedRoot = ResolveScriptsRoot(settings);
+                var normalized = Path.GetFullPath(resolvedRoot);
+                if (string.Equals(_scriptsRoot, normalized, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                InitializeRuntime(normalized);
+                AppendLog($"Updated scripts path to: {normalized}");
+            });
         }
 
         private void Runtime_ScriptsReloaded(object? sender, ScriptRuntimeSnapshot snapshot)
@@ -125,7 +194,20 @@ namespace GUI
                 RebuildOperationsTree(snapshot);
 
                 AppendLog($"Loaded {snapshot.Collections.Count} collections.");
+                HideCompilationWarningBanner();
             });
+        }
+
+        private void HideCompilationWarningBanner()
+        {
+            _compilationWarningBannerText.Text = string.Empty;
+            _compilationWarningBanner.IsVisible = false;
+        }
+
+        private void ShowCompilationWarningBanner(string message)
+        {
+            _compilationWarningBannerText.Text = message;
+            _compilationWarningBanner.IsVisible = true;
         }
 
         private void RebuildOperationsTree(
@@ -978,12 +1060,94 @@ namespace GUI
             {
                 AppendLog(message);
             }
+
+            if (string.IsNullOrWhiteSpace(result.SolutionPath) || !File.Exists(result.SolutionPath))
+            {
+                AppendLog("No generated solution file was found to open.");
+                return;
+            }
+
+            if (TryOpenSolutionInNewVisualStudioInstance(result.SolutionPath, out var launchMessage))
+            {
+                AppendLog(launchMessage);
+            }
+            else
+            {
+                AppendLog(launchMessage);
+            }
+        }
+
+        private static bool TryOpenSolutionInNewVisualStudioInstance(string solutionPath, out string message)
+        {
+            try
+            {
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = "devenv.exe",
+                    Arguments = $"\"{solutionPath}\"",
+                    UseShellExecute = true,
+                };
+
+                var process = Process.Start(startInfo);
+                if (process != null)
+                {
+                    message = $"Opened generated script solution in Visual Studio: {solutionPath}";
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                message = $"Visual Studio direct launch failed ({ex.Message}). Falling back to shell open...";
+            }
+
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = solutionPath,
+                    UseShellExecute = true,
+                });
+
+                message = $"Opened generated script solution via shell association: {solutionPath}";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                message = $"Failed to open generated script solution: {ex.Message}";
+                return false;
+            }
         }
 
         private void Runtime_CompilationFailed(object? sender, IReadOnlyList<ScriptCompilationDiagnostic> diagnostics)
         {
             Dispatcher.UIThread.Post(() =>
             {
+                var excludedFiles = diagnostics
+                    .Where(d => string.Equals(d.Id, "SCRIPT_EXCLUDED", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(d.FilePath))
+                    .Select(d => Path.GetFileName(d.FilePath))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                var errorCount = diagnostics.Count(d => string.Equals(d.Severity, "Error", StringComparison.OrdinalIgnoreCase));
+                if (excludedFiles.Count > 0)
+                {
+                    var filesSummary = string.Join(", ", excludedFiles.Take(3));
+                    if (excludedFiles.Count > 3)
+                    {
+                        filesSummary += ", ...";
+                    }
+
+                    ShowCompilationWarningBanner($"Script reload completed with compile errors. Excluded file(s): {filesSummary}. See Run Log for details.");
+                }
+                else if (errorCount > 0)
+                {
+                    ShowCompilationWarningBanner($"Script reload failed with {errorCount} error(s). See Run Log for details.");
+                }
+                else
+                {
+                    HideCompilationWarningBanner();
+                }
+
                 foreach (var diagnostic in diagnostics)
                 {
                     AppendLog($"{diagnostic.Severity} {diagnostic.Id}: {diagnostic.Message} [{diagnostic.FilePath}] ({diagnostic.Line}:{diagnostic.Column})");
@@ -1025,12 +1189,19 @@ namespace GUI
 
         private static string GetDefaultsPath()
         {
-            var scriptsRoot = ResolveScriptsRoot();
+            var settings = new SettingsService(SettingsService.GetDefaultSettingsPath()).Current;
+            var scriptsRoot = ResolveScriptsRoot(settings);
             return Path.Combine(scriptsRoot, ".scriptor", "defaults.json");
         }
 
-        private static string ResolveScriptsRoot()
+        private static string ResolveScriptsRoot(AppSettings settings)
         {
+            var configuredPath = settings.ScriptsRoot;
+            if (!string.IsNullOrWhiteSpace(configuredPath))
+            {
+                return configuredPath;
+            }
+
             var outputScripts = Path.Combine(AppContext.BaseDirectory, "Scripts");
 
             var dir = new DirectoryInfo(AppContext.BaseDirectory);
@@ -1050,13 +1221,15 @@ namespace GUI
 
         private static string GetPlaylistsPath()
         {
-            var scriptsRoot = ResolveScriptsRoot();
+            var settings = new SettingsService(SettingsService.GetDefaultSettingsPath()).Current;
+            var scriptsRoot = ResolveScriptsRoot(settings);
             return Path.Combine(scriptsRoot, ".scriptor", "playlists.json");
         }
 
         private static string GetWindowStatePath()
         {
-            var scriptsRoot = ResolveScriptsRoot();
+            var settings = new SettingsService(SettingsService.GetDefaultSettingsPath()).Current;
+            var scriptsRoot = ResolveScriptsRoot(settings);
             return Path.Combine(scriptsRoot, ".scriptor", "window-state.json");
         }
 
@@ -1645,6 +1818,7 @@ namespace GUI
         protected override void OnClosed(EventArgs e)
         {
             SaveWindowState();
+            _settingsService.SettingsChanged -= SettingsService_SettingsChanged;
             Logger.EntryWritten -= Logger_EntryWritten;
             _statusSpinnerTimer.Stop();
             _statusSpinnerTimer.Tick -= StatusSpinnerTimer_Tick;
@@ -1660,5 +1834,6 @@ namespace GUI
             public int? Y { get; set; }
             public string? WindowState { get; set; }
         }
+
     }
 }

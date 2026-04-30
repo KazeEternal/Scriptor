@@ -45,7 +45,47 @@ Create classes implementing `IScriptCollection` in `User_Defined_Scripts` and an
 - Use `Reload Scripts` after edits.
 
 ### 3) Run from CLI
-Start the `Scripts` project for console-driven routine selection/execution.
+The `Scripts` project supports both interactive mode and CI-friendly non-interactive mode.
+
+#### Show CLI help
+```powershell
+dotnet run --project Scripts -- --help
+```
+
+#### Discovery commands
+```powershell
+dotnet run --project Scripts -- --list-routines
+dotnet run --project Scripts -- --list-playlists
+dotnet run --project Scripts -- --list-playlists --playlist-file ".\User_Defined_Scripts\.scriptor\playlists.json"
+```
+
+#### Run a routine from CLI (Jenkins/GitLab CI friendly)
+```powershell
+# by routine display name with explicit parameter override(s)
+dotnet run --project Scripts -- --run-routine "Hello to a Person" --set "Person Name=CI Runner"
+
+# by stable routine id with json parameter file
+dotnet run --project Scripts -- --run-routine "Scripts.Scripting.HelloWorldScripts.HelloWorlder" --params-file ".\ci\params.json"
+```
+
+Parameter JSON shape:
+```json
+{
+  "Person Name": "CI Runner"
+}
+```
+
+#### Run a playlist from CLI
+```powershell
+dotnet run --project Scripts -- --run-playlist "Nightly Build Playlist"
+dotnet run --project Scripts -- --run-playlist "Nightly Build Playlist" --playlist-file ".\User_Defined_Scripts\.scriptor\playlists.json"
+```
+
+#### Common options
+- `--scripts-root <path>` override scripts root folder.
+- `--playlist-file <path>` override playlist file location.
+- `--set "Key=Value"` repeatable per-parameter override.
+- `--params-file <path>` load parameter overrides from JSON.
 
 ## Key features
 
@@ -77,6 +117,7 @@ The GUI automatically picks editors by parameter type and usage hints:
 - Build playlists from routines.
 - Execute sequentially or via parallel groups.
 - Playlist item logs can collapse automatically on completion.
+- Can be executed from CLI (`--run-playlist`) for CI/CD scenarios.
 
 ### Logging and diagnostics
 - Session log files are created per app session and flushed on every write.

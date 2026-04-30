@@ -101,6 +101,10 @@ namespace Scripts.Scriptor.Conductor
                 builder.AppendLine("  </ItemGroup>");
             }
 
+            builder.AppendLine("  <ItemGroup>");
+            builder.AppendLine("    <Compile Include=\"../../**/*.cs\" Exclude=\"../../.scriptor/**/*.cs\" Link=\"%(RecursiveDir)%(Filename)%(Extension)\" />");
+            builder.AppendLine("  </ItemGroup>");
+
             builder.AppendLine("</Project>");
             File.WriteAllText(projectPath, builder.ToString());
         }
@@ -111,14 +115,45 @@ namespace Scripts.Scriptor.Conductor
             string solutionName,
             ICollection<string> messages)
         {
-            var solutionPath = Path.Combine(projectRoot, $"{solutionName}.sln");
-            if (!File.Exists(solutionPath))
+            var slnPath = Path.Combine(projectRoot, $"{solutionName}.sln");
+            var solutionPath = ResolveExistingSolutionPath(projectRoot, solutionName);
+            if (!File.Exists(slnPath))
             {
-                RunDotNetCommand(projectRoot, $"new sln -n {solutionName}", messages);
+                RunDotNetCommand(projectRoot, $"new sln --name {solutionName} --format sln", messages);
+                solutionPath = ResolveExistingSolutionPath(projectRoot, solutionName);
             }
 
-            RunDotNetCommand(projectRoot, $"sln {solutionPath} add \"{projectPath}\"", messages);
+            if (solutionPath == null)
+            {
+                RunDotNetCommand(projectRoot, $"new sln --name {solutionName}", messages);
+                solutionPath = ResolveExistingSolutionPath(projectRoot, solutionName);
+            }
+
+            if (solutionPath == null)
+            {
+                messages.Add($"Unable to locate generated solution file for '{solutionName}'.");
+                return null;
+            }
+
+            RunDotNetCommand(projectRoot, $"sln \"{solutionPath}\" add \"{projectPath}\"", messages);
             return solutionPath;
+        }
+
+        private static string? ResolveExistingSolutionPath(string projectRoot, string solutionName)
+        {
+            var slnPath = Path.Combine(projectRoot, $"{solutionName}.sln");
+            if (File.Exists(slnPath))
+            {
+                return slnPath;
+            }
+
+            var slnxPath = Path.Combine(projectRoot, $"{solutionName}.slnx");
+            if (File.Exists(slnxPath))
+            {
+                return slnxPath;
+            }
+
+            return null;
         }
 
         private static void RunDotNetCommand(string workingDirectory, string arguments, ICollection<string> messages)

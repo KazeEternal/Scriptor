@@ -357,8 +357,13 @@ namespace Scripts.Scriptor.Conductor
                 var collectionDescription = type.GetCustomAttribute<ScriptCollectionDescriptionAttribute>()?.Description;
 
                 var routines = new List<ScriptRoutineDescriptor>();
-                var methods = type.GetMethods()
-                    .Where(method => method.GetCustomAttributes(typeof(ScriptRoutineAttribute), true).Length > 0)
+                var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
+                    .Where(method =>
+                        !method.IsSpecialName &&
+                        (
+                            method.GetCustomAttributes(typeof(ScriptRoutineAttribute), true).Length > 0 ||
+                            method.GetParameters().Any(parameter => parameter.ParameterType == typeof(IScriptContext))
+                        ))
                     .ToList();
 
                 foreach (var method in methods)
@@ -369,7 +374,7 @@ namespace Scripts.Scriptor.Conductor
                         .FirstOrDefault();
 
                     var routineName = routineAttribute?.Name ?? method.Name;
-                    var routineDescription = routineAttribute?.Description;
+                    var routineDescription = routineAttribute?.Description ?? string.Empty;
 
                     var parameters = new List<ScriptParameterDescriptor>();
                     foreach (var parameter in method.GetParameters())
@@ -826,6 +831,7 @@ namespace Scripts.Scriptor.Conductor
 
                 var name = assemblyName.Name ?? string.Empty;
                 if (name.Length > 0 &&
+                    !string.Equals(name, "ScriptorCommon", StringComparison.OrdinalIgnoreCase) &&
                     !name.StartsWith("System.", StringComparison.OrdinalIgnoreCase) &&
                     !name.StartsWith("Microsoft.", StringComparison.OrdinalIgnoreCase) &&
                     !string.Equals(name, "System", StringComparison.OrdinalIgnoreCase) &&
