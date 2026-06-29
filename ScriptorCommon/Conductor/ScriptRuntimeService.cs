@@ -241,7 +241,10 @@ namespace Scripts.Scriptor.Conductor
             {
                 stopwatch.Stop();
                 context.IsSuccess = false;
-                return new ScriptExecutionResult(false, scopeId, start, context, ex, stopwatch.Elapsed);
+                var actualException = ex is TargetInvocationException { InnerException: not null }
+                    ? ex.InnerException
+                    : ex;
+                return new ScriptExecutionResult(false, scopeId, start, context, actualException, stopwatch.Elapsed);
             }
         }
 
