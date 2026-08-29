@@ -10,7 +10,7 @@ It is designed for **hot-loaded automation scripts**: drop/update `.cs` files in
 - Dynamically compiles and runs routines at runtime.
 - Supports script metadata via attributes for names, descriptions, parameters, and package dependencies.
 - Provides rich execution telemetry (log rows, progress bars, task-level details, success/failure state).
-- Persists useful runtime state (defaults, playlists, diagnostics, session logs, window layout).
+- Persists useful runtime state (defaults, playlists, commands, diagnostics, session logs, window layout).
 
 ## Primary components
 
@@ -39,10 +39,11 @@ Create classes implementing `IScriptCollection` in `User_Defined_Scripts` and an
 
 ### 2) Run from GUI
 - Start the `GUI` project.
-- Select routines in the left tree.
-- Configure parameters in `Routine Configuration`.
-- Run individual routines or playlists.
-- Use `Reload Scripts` after edits.
+- Select routines in the **Collections** tree, configure parameters in **Routine Configuration**, then run them.
+- Use **PlayLists** to run saved sequential or parallel routine groups.
+- Use **Commands** for lightweight browser and program launches.
+- Right-click tree entries for contextual actions. Commands can also be double-clicked to run.
+- Use **Reload Scripts** after edits; script and command changes are also detected automatically.
 
 ### 3) Run from CLI
 The `Scripts` project supports both interactive mode and CI-friendly non-interactive mode.
@@ -109,42 +110,56 @@ The GUI automatically picks editors by parameter type and usage hints:
   - `ui:slider(min,max,step)`
 
 ### Quick command
-Keep the GUI running in the background or minimized, then press **Windows+Alt+S** to open a command palette centered on the display containing the mouse pointer. Search routines and press Enter to run them with their suggested default parameters, edit `Parameter=Value` overrides inline, or use `>reload`, `>show`, and `>minimize`.
-The selected routine also shows its script and parameter descriptions from the routine attributes.
+Keep the GUI running in the background or minimized, then press **Windows+Alt+S** to open a command palette centered on the display containing the mouse pointer.
 
-  ### Commands
-  The GUI adds a **Commands** tree category after playlists for lightweight URL and program launches. Commands are stored in `<ScriptsRoot>\.scriptor\commands.json` and are hot-reloaded when the file changes; a new scripts root receives **Open Pond.net** and **Open MakeMKV** automatically. URL commands cache their site's `/favicon.ico` locally; commands use a bundled placeholder when no icon is available. Set `iconPath` to a PNG, ICO, or Avalonia resource URI to override any command icon.
-  You may rename either default command; Scriptor recognizes its action by type and target rather than its display name.
+- Type part of a command or routine name; commands are listed before routines.
+- Press **Tab** to accept the top match. Suggested parameter assignments are selected for quick editing.
+- Press **Enter** to run the selected item, or **Escape** to dismiss the palette.
+- Override script parameters inline: `Routine Name -- Parameter=Value; Other Parameter=Value`.
+- Run built-in palette commands: `>reload`, `>show`, and `>minimize`.
 
-  ```json
-  [
-    {
-      "name": "Open Pond.net",
-      "description": "Open the Pond.net website in your default browser.",
-      "type": "Url",
-      "target": "https://pond.net"
-    },
-    {
-      "name": "Open Terminal",
-      "description": "Start Windows Terminal.",
-      "type": "Program",
-      "target": "wt.exe",
-      "arguments": ""
-    }
-  ]
-  ```
+The selected routine shows its script and parameter descriptions from its attributes.
 
-  ### Progress channels and task-level logs
+### Commands
+The **Commands** category is for lightweight URL and program launches. Commands are stored in `<ScriptsRoot>\.scriptor\commands.json` and hot-reload after file changes. New script roots receive **Open Pond.net** and **Open MakeMKV** automatically.
+
+- URL commands open HTTP(S) links in the default browser and cache the site's `/favicon.ico` when available.
+- Program commands launch a local executable with optional arguments.
+- Commands use the bundled Scriptor image when no custom/site icon is available.
+- Set `iconPath` to a PNG, ICO, or Avalonia resource URI to override an icon.
+- Default commands may be renamed; Scriptor identifies them by action rather than display name.
+
+```json
+[
+  {
+    "name": "Pond.net",
+    "description": "Open the Pond.net website in your default browser.",
+    "type": "Url",
+    "target": "https://pond.net"
+  },
+  {
+    "name": "MakeMKV",
+    "description": "Start MakeMKV from its standard Windows installation path.",
+    "type": "Program",
+    "target": "C:\\Program Files (x86)\\MakeMKV\\makemkv.exe",
+    "arguments": "",
+    "iconPath": "C:\\path\\to\\makemkv.png"
+  }
+]
+```
+
+### Progress channels and task-level logs
 - `context.CreateProgressChannel(...)` for managed progress keys.
 - `Report(...)` for progress updates.
 - `LogInfo/LogWarning/LogError(...)` for task-scoped nested output.
-  - Use **Copy Run Log** in the GUI to copy the current run log as timestamped plain text.
+- Use **Copy Run Log**, or right-click the log list, to copy the current run log as timestamped plain text.
 
 ### Playlists
 - Build playlists from routines.
 - Execute sequentially or via parallel groups.
-- Use **Edit Playlists** in the GUI to create, rename, reorder, and delete playlists; add routines, configure parallel groups, and change the per-playlist routine parameters by selecting the routine in the playlist tree.
-- Right-click a source routine to add it to a playlist or create a playlist for it. The **Add to Playlist** submenu lists most-recently edited playlists first. Right-click playlist entries to edit, remove, or refresh them, and drag a playlist routine onto a sibling to change its execution order.
+- Use **Edit Playlists** in the GUI to create, rename, reorder, and delete playlists; add routines, configure parallel groups, and change per-playlist routine parameters by selecting the routine in the playlist tree.
+- Right-click a source routine to add it to a playlist or create a playlist for it. The **Add to Playlist** submenu lists most-recently edited playlists first.
+- Right-click playlist entries to edit, remove, or refresh them. Drag a routine onto a sibling to change execution order within its sequential list or parallel group.
 - Playlist item logs can collapse automatically on completion.
 - Can be executed from CLI (`--run-playlist`) for CI/CD scenarios.
 
