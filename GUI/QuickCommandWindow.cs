@@ -16,8 +16,10 @@ namespace GUI
     internal sealed class QuickCommandWindow : Window
     {
         private readonly IReadOnlyList<ScriptRoutineDescriptor> _routines;
+        private readonly IReadOnlyList<CommandDefinition> _commands;
         private readonly Func<ScriptRoutineDescriptor, IReadOnlyDictionary<string, string>, Task<string?>> _runRoutine;
-        private readonly Action<QuickCommandAction> _runCommand;
+        private readonly Func<CommandDefinition, Task<string?>> _runDefinedCommand;
+        private readonly Action<QuickCommandAction> _runBuiltInCommand;
         private readonly TextBox _input = new();
         private readonly ListBox _suggestions = new();
         private readonly TextBlock _details = new();
@@ -26,12 +28,16 @@ namespace GUI
 
         public QuickCommandWindow(
             IReadOnlyList<ScriptRoutineDescriptor> routines,
+            IReadOnlyList<CommandDefinition> commands,
             Func<ScriptRoutineDescriptor, IReadOnlyDictionary<string, string>, Task<string?>> runRoutine,
-            Action<QuickCommandAction> runCommand)
+            Func<CommandDefinition, Task<string?>> runDefinedCommand,
+            Action<QuickCommandAction> runBuiltInCommand)
         {
             _routines = routines;
+            _commands = commands;
             _runRoutine = runRoutine;
-            _runCommand = runCommand;
+            _runDefinedCommand = runDefinedCommand;
+            _runBuiltInCommand = runBuiltInCommand;
 
             Title = "Scriptor Quick Command";
             Width = 720;
@@ -98,6 +104,15 @@ namespace GUI
             }
             else
             {
+                foreach (var command in _commands)
+                {
+                    var suggestion = QuickCommandSuggestion.ForDefinedCommand(command);
+                    if (Matches(query, suggestion.Label, suggestion.Input))
+                    {
+                        _matches.Add(suggestion);
+                    }
+                }
+
                 foreach (var routine in _routines)
                 {
                     var suggestion = QuickCommandSuggestion.ForRoutine(routine);
@@ -116,7 +131,19 @@ namespace GUI
 
         private void UpdateSelectedDetails()
         {
-            if (_suggestions.SelectedItem is not QuickCommandSuggestion { Routine: { } routine })
+            if (_suggestions.SelectedItem is not QuickCommandSuggestion suggestion)
+            {
+                _details.Text = string.Empty;
+                return;
+            }
+
+            if (suggestion.Command != null)
+            {
+                _details.Text = suggestion.Command.Description;
+                return;
+            }
+
+            if (suggestion.Routine is not { } routine)
             {
                 _details.Text = string.Empty;
                 return;
@@ -202,8 +229,24 @@ namespace GUI
 
             if (QuickCommandSuggestion.TryGetCommand(input, out var command))
             {
-                _runCommand(command);
+                _runBuiltInCommand(command);
                 Close();
+                return;
+            }
+
+            if (_suggestions.SelectedItem is QuickCommandSuggestion { Command: { } definedCommand })
+            {
+                _status.Text = $"Running {definedCommand.Name}...";
+                _status.Foreground = Brushes.Gray;
+                var commandError = await _runDefinedCommand(definedCommand);
+                if (commandError == null)
+                {
+                    Close();
+                    return;
+                }
+
+                _status.Text = commandError;
+                _status.Foreground = Brushes.IndianRed;
                 return;
             }
 
@@ -270,16 +313,22 @@ namespace GUI
 
         private sealed class QuickCommandSuggestion
         {
-            private QuickCommandSuggestion(string label, string input, ScriptRoutineDescriptor? routine = null)
+            private QuickCommandSuggestion(
+                string label,
+                string input,
+                ScriptRoutineDescriptor? routine = null,
+                CommandDefinition? command = null)
             {
                 Label = label;
                 Input = input;
                 Routine = routine;
+                Command = command;
             }
 
             public string Label { get; }
             public string Input { get; }
             public ScriptRoutineDescriptor? Routine { get; }
+            public CommandDefinition? Command { get; }
 
             public static IReadOnlyList<QuickCommandSuggestion> Commands { get; } =
             [
@@ -300,6 +349,14 @@ namespace GUI
                     ? string.Empty
                     : $" — {routine.Description}";
                 return new QuickCommandSuggestion($"Run: {routine.Name}{description}", input, routine);
+            }
+
+            public static QuickCommandSuggestion ForDefinedCommand(CommandDefinition command)
+            {
+                var description = string.IsNullOrWhiteSpace(command.Description)
+                    ? string.Empty
+                    : $" — {command.Description}";
+                return new QuickCommandSuggestion($"Command: {command.Name}{description}", command.Name, command: command);
             }
 
             public static bool TryGetCommand(string input, out QuickCommandAction command)

@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <AvaloniaResource Include="Assets\Scriptor_Icon_Pack\Scriptor.ico" />
+    <AvaloniaResource Include="Assets\Scriptor_Icon_Pack\Scriptor_32x32.png" />
   </ItemGroup>
 
   <ItemGroup>

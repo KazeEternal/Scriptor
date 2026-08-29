@@ -108,14 +108,37 @@ The GUI automatically picks editors by parameter type and usage hints:
   - `ui:multiline`
   - `ui:slider(min,max,step)`
 
-  ### Quick command
-  Keep the GUI running in the background or minimized, then press **Windows+Alt+S** to open a command palette centered on the display containing the mouse pointer. Search routines and press Enter to run them with their suggested default parameters, edit `Parameter=Value` overrides inline, or use `>reload`, `>show`, and `>minimize`.
-  The selected routine also shows its script and parameter descriptions from the routine attributes.
+### Quick command
+Keep the GUI running in the background or minimized, then press **Windows+Alt+S** to open a command palette centered on the display containing the mouse pointer. Search routines and press Enter to run them with their suggested default parameters, edit `Parameter=Value` overrides inline, or use `>reload`, `>show`, and `>minimize`.
+The selected routine also shows its script and parameter descriptions from the routine attributes.
 
-### Progress channels and task-level logs
+  ### Commands
+  The GUI adds a **Commands** tree category after playlists for lightweight URL and program launches. Commands are stored in `<ScriptsRoot>\.scriptor\commands.json` and are hot-reloaded when the file changes; a new scripts root receives **Open Pond.net** and **Open MakeMKV** automatically. URL commands cache their site's `/favicon.ico` locally; commands use a bundled placeholder when no icon is available. Set `iconPath` to a PNG, ICO, or Avalonia resource URI to override any command icon.
+  You may rename either default command; Scriptor recognizes its action by type and target rather than its display name.
+
+  ```json
+  [
+    {
+      "name": "Open Pond.net",
+      "description": "Open the Pond.net website in your default browser.",
+      "type": "Url",
+      "target": "https://pond.net"
+    },
+    {
+      "name": "Open Terminal",
+      "description": "Start Windows Terminal.",
+      "type": "Program",
+      "target": "wt.exe",
+      "arguments": ""
+    }
+  ]
+  ```
+
+  ### Progress channels and task-level logs
 - `context.CreateProgressChannel(...)` for managed progress keys.
 - `Report(...)` for progress updates.
 - `LogInfo/LogWarning/LogError(...)` for task-scoped nested output.
+  - Use **Copy Run Log** in the GUI to copy the current run log as timestamped plain text.
 
 ### Playlists
 - Build playlists from routines.
@@ -139,6 +162,7 @@ Under `<ScriptsRoot>\\.scriptor` (typically `User_Defined_Scripts\\.scriptor`):
 
 - `defaults.json` - saved parameter defaults
 - `playlists.json` - playlists
+- `commands.json` - lightweight URL and program commands
 - `window-state.json` - GUI size/position/state
 - `last-diagnostics.txt` - latest compile diagnostics
 - `logs\\session-*.log` - session runtime logs

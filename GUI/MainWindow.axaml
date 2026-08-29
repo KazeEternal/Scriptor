@@ -62,17 +62,24 @@
         <Grid RowDefinitions="*,Auto,120">
           <Grid Grid.Row="0" RowDefinitions="Auto,*">
             <TextBlock Grid.Row="0" Text="Operations" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8" />
-            <TreeView Grid.Row="1" x:Name="CollectionsTree">
+            <TreeView Grid.Row="1" x:Name="CollectionsTree" DoubleTapped="CommandTreeItem_DoubleTapped">
               <TreeView.ItemTemplate>
                 <TreeDataTemplate ItemsSource="{Binding Children}">
-                  <TextBlock Text="{Binding Name}"
-                             ToolTip.Tip="{Binding Description}"
-                             DragDrop.AllowDrop="True"
-                             PointerPressed="PlaylistTreeItem_PointerPressed"
-                             PointerMoved="PlaylistTreeItem_PointerMoved"
-                             PointerReleased="PlaylistTreeItem_PointerReleased"
-                             DragDrop.DragOver="PlaylistTreeItem_DragOver"
-                             DragDrop.Drop="PlaylistTreeItem_Drop" />
+                  <StackPanel Orientation="Horizontal"
+                              Spacing="6"
+                              DragDrop.AllowDrop="True"
+                              PointerPressed="PlaylistTreeItem_PointerPressed"
+                              PointerMoved="PlaylistTreeItem_PointerMoved"
+                              PointerReleased="PlaylistTreeItem_PointerReleased"
+                              DragDrop.DragOver="PlaylistTreeItem_DragOver"
+                              DragDrop.Drop="PlaylistTreeItem_Drop">
+                    <Image Width="16"
+                           Height="16"
+                           Source="{Binding Icon}"
+                           IsVisible="{Binding HasIcon}" />
+                    <TextBlock Text="{Binding Name}"
+                               ToolTip.Tip="{Binding Description}" />
+                  </StackPanel>
                 </TreeDataTemplate>
               </TreeView.ItemTemplate>
             </TreeView>
@@ -127,7 +134,10 @@
 
     <Border Grid.Row="4" Background="#252526" BorderThickness="1" BorderBrush="#3F3F46" CornerRadius="8" Padding="10" Margin="10,0,10,10">
       <Grid RowDefinitions="Auto,*">
-        <TextBlock Text="Run Log" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8" />
+        <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+          <TextBlock Text="Run Log" FontSize="16" FontWeight="SemiBold" />
+          <Button Grid.Column="1" x:Name="CopyRunLogButton" Content="Copy Run Log" Padding="8,4" />
+        </Grid>
         <Grid Grid.Row="1" RowDefinitions="Auto,*">
           <Border Grid.Row="0" BorderThickness="1" BorderBrush="#3F3F46" CornerRadius="4" Padding="6" Background="#1E1E1E">
             <Grid ColumnDefinitions="26,*,120,120">
@@ -138,6 +148,11 @@
             </Grid>
           </Border>
           <ScrollViewer x:Name="RunLogScrollViewer" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,6,0,0">
+            <ScrollViewer.ContextMenu>
+              <ContextMenu>
+                <MenuItem Header="Copy Run Log" Click="CopyRunLogButton_Click" />
+              </ContextMenu>
+            </ScrollViewer.ContextMenu>
             <StackPanel x:Name="RunLogRowsPanel" Spacing="4" />
           </ScrollViewer>
         </Grid>

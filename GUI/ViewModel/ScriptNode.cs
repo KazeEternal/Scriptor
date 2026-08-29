@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
+using Avalonia.Media.Imaging;
 using System.Text;
 using System.Threading.Tasks;
 using Scripts.Scriptor.Conductor;
@@ -19,6 +20,8 @@ namespace GUI.ViewModel
         Playlist,
         PlaylistRoutine,
         PlaylistParallelGroup,
+        CommandsRoot,
+        Command,
     }
 
     public class ScriptNode : INotifyPropertyChanged
@@ -31,9 +34,19 @@ namespace GUI.ViewModel
         public ScriptRoutineDescriptor? Routine { get; set; }
         public PlaylistDefinition? Playlist { get; set; }
         public PlaylistItemDefinition? PlaylistItem { get; set; }
+        public CommandDefinition? Command { get; set; }
+        public Bitmap? Icon { get; set; }
+        public bool HasIcon => Icon != null;
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
         public ObservableCollection<ScriptNode> Children { get; set; } = new ObservableCollection<ScriptNode>();
+
+        public void SetIcon(Bitmap? icon)
+        {
+            Icon = icon;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Icon)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasIcon)));
+        }
     }
 }

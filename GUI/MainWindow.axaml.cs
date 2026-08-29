@@ -5,15 +5,19 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Threading.Tasks;
+using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 using Avalonia.Threading;
 using GUI.ViewModel;
 using Scripts.Scriptor;
@@ -28,10 +32,14 @@ namespace GUI
         private readonly ObservableCollection<ScriptNode> _treeNodes = new();
         private readonly Dictionary<string, ScriptRoutineDescriptor> _routinesById = new(StringComparer.OrdinalIgnoreCase);
         private readonly List<PlaylistDefinition> _playlists = new();
+        private readonly List<CommandDefinition> _commands = new();
         private readonly Dictionary<string, RoutineRunRowUi> _runRowsByScope = new(StringComparer.OrdinalIgnoreCase);
         private static readonly string[] SpinnerFrames = ["|", "/", "-", "\\"];
         private const string PlaylistItemDragFormat = "application/x-scriptor-playlist-item";
+        private const uint MessageBeepInformation = 0x00000040;
+        private const string DefaultCommandIconUri = "avares://GUI/Assets/Scriptor_Icon_Pack/Scriptor_32x32.png";
         private readonly DispatcherTimer _statusSpinnerTimer = new() { Interval = TimeSpan.FromMilliseconds(110) };
+        private readonly DispatcherTimer _commandsReloadTimer = new() { Interval = TimeSpan.FromMilliseconds(300) };
         private int _spinnerFrameIndex;
         private static readonly IBrush PanelBorderBrush = new SolidColorBrush(Color.Parse("#3F3F46"));
         private static readonly IBrush PanelFillBrush = new SolidColorBrush(Color.Parse("#1E1E1E"));
@@ -52,6 +60,7 @@ namespace GUI
         private Button _generateProjectButton = null!;
         private Button _settingsButton = null!;
         private Button _runSelectedButton = null!;
+        private Button _copyRunLogButton = null!;
         private TextBlock _scriptPathStatus = null!;
         private Border _compilationWarningBanner = null!;
         private TextBlock _compilationWarningBannerText = null!;
@@ -64,6 +73,7 @@ namespace GUI
         private string _scriptsRoot = string.Empty;
         private readonly SettingsService _settingsService;
         private readonly GlobalHotKey _quickCommandHotKey = new();
+        private FileSystemWatcher? _commandsWatcher;
         private ScriptNode? _draggedPlaylistItemNode;
         private Point _dragStartPoint;
         private QuickCommandWindow? _quickCommandWindow;
@@ -83,6 +93,7 @@ namespace GUI
             _generateProjectButton.Click += GenerateProjectButton_Click;
             _settingsButton.Click += SettingsButton_Click;
             _runSelectedButton.Click += RunButton_Click;
+            _copyRunLogButton.Click += CopyRunLogButton_Click;
             _collectionsTree.SelectionChanged += CollectionsTree_SelectionChanged;
             _settingsService.SettingsChanged += SettingsService_SettingsChanged;
 
@@ -93,6 +104,7 @@ namespace GUI
 
             _statusSpinnerTimer.Tick += StatusSpinnerTimer_Tick;
             _statusSpinnerTimer.Start();
+            _commandsReloadTimer.Tick += CommandsReloadTimer_Tick;
             _quickCommandHotKey.Pressed += QuickCommandHotKey_Pressed;
             Opened += MainWindow_Opened;
         }
@@ -111,6 +123,7 @@ namespace GUI
             _generateProjectButton = this.FindControl<Button>("GenerateProjectButton") ?? throw new InvalidOperationException("GenerateProjectButton not found.");
             _settingsButton = this.FindControl<Button>("SettingsButton") ?? throw new InvalidOperationException("SettingsButton not found.");
             _runSelectedButton = this.FindControl<Button>("RunSelectedButton") ?? throw new InvalidOperationException("RunSelectedButton not found.");
+            _copyRunLogButton = this.FindControl<Button>("CopyRunLogButton") ?? throw new InvalidOperationException("CopyRunLogButton not found.");
             _scriptPathStatus = this.FindControl<TextBlock>("ScriptPathStatus") ?? throw new InvalidOperationException("ScriptPathStatus not found.");
             _compilationWarningBanner = this.FindControl<Border>("CompilationWarningBanner") ?? throw new InvalidOperationException("CompilationWarningBanner not found.");
             _compilationWarningBannerText = this.FindControl<TextBlock>("CompilationWarningBannerText") ?? throw new InvalidOperationException("CompilationWarningBannerText not found.");
@@ -139,7 +152,50 @@ namespace GUI
             _runtime.ScriptsReloaded += Runtime_ScriptsReloaded;
             _runtime.CompilationFailed += Runtime_CompilationFailed;
             _runtime.StartWatching();
+            ConfigureCommandsWatcher();
             _runtime.ReloadScripts();
+        }
+
+        private void ConfigureCommandsWatcher()
+        {
+            _commandsWatcher?.Dispose();
+
+            var commandsDirectory = Path.GetDirectoryName(GetCommandsPath())!;
+            Directory.CreateDirectory(commandsDirectory);
+            _commandsWatcher = new FileSystemWatcher(commandsDirectory, Path.GetFileName(GetCommandsPath()))
+            {
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+                EnableRaisingEvents = true,
+            };
+            _commandsWatcher.Changed += CommandsWatcher_Changed;
+            _commandsWatcher.Created += CommandsWatcher_Changed;
+            _commandsWatcher.Deleted += CommandsWatcher_Changed;
+            _commandsWatcher.Renamed += CommandsWatcher_Renamed;
+        }
+
+        private void CommandsWatcher_Changed(object sender, FileSystemEventArgs e)
+        {
+            Dispatcher.UIThread.Post(RestartCommandsReloadTimer);
+        }
+
+        private void CommandsWatcher_Renamed(object sender, RenamedEventArgs e)
+        {
+            Dispatcher.UIThread.Post(RestartCommandsReloadTimer);
+        }
+
+        private void RestartCommandsReloadTimer()
+        {
+            _commandsReloadTimer.Stop();
+            _commandsReloadTimer.Start();
+        }
+
+        private void CommandsReloadTimer_Tick(object? sender, EventArgs e)
+        {
+            _commandsReloadTimer.Stop();
+            _commands.Clear();
+            _commands.AddRange(LoadCommands());
+            RefreshCommandsTree();
+            AppendLog("Reloaded commands.");
         }
 
         private void MainWindow_Opened(object? sender, EventArgs e)
@@ -165,7 +221,9 @@ namespace GUI
 
             _quickCommandWindow = new QuickCommandWindow(
                 _routinesById.Values.OrderBy(routine => routine.Name).ToList(),
+                _commands.OrderBy(command => command.Name).ToList(),
                 RunQuickRoutineAsync,
+                ExecuteCommandAsync,
                 ExecuteQuickCommand);
             _quickCommandWindow.Closed += (_, _) => _quickCommandWindow = null;
 
@@ -207,6 +265,7 @@ namespace GUI
             AddRunMessage(scopeId, $"Running {routine.Name} from quick command...");
             var result = await _runtime.ExecuteRoutineAsync(routine, arguments, scopeId);
             CompleteRunRow(result.ExecutionScopeId, result.IsSuccess, result.Duration, result.StartedAt);
+            PlayCompletionChime();
             if (result.Exception == null)
             {
                 return result.IsSuccess ? null : $"Routine '{routine.Name}' failed.";
@@ -289,8 +348,11 @@ namespace GUI
 
                 _playlists.Clear();
                 _playlists.AddRange(LoadPlaylists());
+                _commands.Clear();
+                _commands.AddRange(LoadCommands());
 
                 RebuildOperationsTree(snapshot);
+                _ = CacheCommandIconsAsync();
 
                 AppendLog($"Loaded {snapshot.Collections.Count} collections.");
                 HideCompilationWarningBanner();
@@ -363,6 +425,7 @@ namespace GUI
         {
             var collectionsRoot = new ScriptNode { Name = "Collections", Kind = ScriptNodeKind.CollectionsRoot };
             var playlistsRoot = new ScriptNode { Name = "PlayLists", Kind = ScriptNodeKind.PlaylistsRoot };
+            var commandsRoot = new ScriptNode { Name = "Commands", Kind = ScriptNodeKind.CommandsRoot };
 
             foreach (var collection in snapshot.Collections)
             {
@@ -394,8 +457,45 @@ namespace GUI
                 playlistsRoot.Children.Add(BuildPlaylistNode(playlist));
             }
 
+            foreach (var command in _commands)
+            {
+                commandsRoot.Children.Add(new ScriptNode
+                {
+                    Name = command.Name,
+                    Description = command.Description,
+                    Kind = ScriptNodeKind.Command,
+                    Command = command,
+                    Icon = LoadCommandIcon(ResolveCommandIconPath(command) ?? DefaultCommandIconUri),
+                });
+            }
+
             _treeNodes.Add(collectionsRoot);
             _treeNodes.Add(playlistsRoot);
+            _treeNodes.Add(commandsRoot);
+        }
+
+        private void RefreshCommandsTree()
+        {
+            var commandsRoot = _treeNodes.FirstOrDefault(node => node.Kind == ScriptNodeKind.CommandsRoot);
+            if (commandsRoot == null)
+            {
+                return;
+            }
+
+            commandsRoot.Children.Clear();
+            foreach (var command in _commands)
+            {
+                commandsRoot.Children.Add(new ScriptNode
+                {
+                    Name = command.Name,
+                    Description = command.Description,
+                    Kind = ScriptNodeKind.Command,
+                    Command = command,
+                    Icon = LoadCommandIcon(ResolveCommandIconPath(command) ?? DefaultCommandIconUri),
+                });
+            }
+
+            _ = CacheCommandIconsAsync();
         }
 
         private ScriptNode BuildPlaylistNode(PlaylistDefinition playlist)
@@ -477,6 +577,79 @@ namespace GUI
             if (node.Kind == ScriptNodeKind.PlaylistRoutine && node.Routine != null && node.PlaylistItem != null)
             {
                 DisplayRoutine(node.Routine, node.PlaylistItem.ParameterValues, values => SavePlaylistItemDefaults(node.PlaylistItem!, values));
+            }
+
+            if (node.Kind == ScriptNodeKind.Command && node.Command != null)
+            {
+                DisplayCommand(node.Command);
+            }
+        }
+
+        private void DisplayCommand(CommandDefinition command)
+        {
+            SaveCurrentRoutineDefaults();
+            _currentRoutine = null;
+            _saveDefaultsAction = null;
+            _parameterViewModels.Clear();
+            _parameterPanel.Children.Clear();
+            _routineDescriptionBox.Text = $"{command.Description}\n\n{command.Type}: {command.Target}";
+        }
+
+        private async Task CacheCommandIconsAsync()
+        {
+            foreach (var command in _commands.Where(command => command.Type == CommandType.Url && string.IsNullOrWhiteSpace(command.IconPath)))
+            {
+                var iconPath = await CommandIconCache.CacheWebsiteIconAsync(_scriptsRoot, command);
+                if (iconPath == null)
+                {
+                    continue;
+                }
+
+                var node = FindNode(_treeNodes, candidate => ReferenceEquals(candidate.Command, command));
+                node?.SetIcon(LoadCommandIcon(new Uri(iconPath).AbsoluteUri));
+            }
+        }
+
+        private string? ResolveCommandIconPath(CommandDefinition command)
+        {
+            if (!string.IsNullOrWhiteSpace(command.IconPath))
+            {
+                if (Uri.TryCreate(command.IconPath, UriKind.Absolute, out var uri))
+                {
+                    return uri.AbsoluteUri;
+                }
+
+                var path = Path.GetFullPath(Path.Combine(_scriptsRoot, command.IconPath));
+                return File.Exists(path) ? new Uri(path).AbsoluteUri : null;
+            }
+
+            var cachePath = Path.Combine(_scriptsRoot, ".scriptor", "command-icons", $"{command.Id}.ico");
+            return File.Exists(cachePath) ? new Uri(cachePath).AbsoluteUri : null;
+        }
+
+        private static Bitmap? LoadCommandIcon(string iconPath)
+        {
+            try
+            {
+                if (Uri.TryCreate(iconPath, UriKind.Absolute, out var uri))
+                {
+                    if (uri.Scheme.Equals("avares", StringComparison.OrdinalIgnoreCase))
+                    {
+                        using var stream = AssetLoader.Open(uri);
+                        return new Bitmap(stream);
+                    }
+
+                    if (uri.IsFile)
+                    {
+                        return new Bitmap(uri.LocalPath);
+                    }
+                }
+
+                return new Bitmap(iconPath);
+            }
+            catch (Exception exception) when (exception is IOException or ArgumentException)
+            {
+                return null;
             }
         }
 
@@ -882,6 +1055,12 @@ namespace GUI
 
         private async void RunButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
         {
+            if (_selectedNode?.Kind == ScriptNodeKind.Command && _selectedNode.Command != null)
+            {
+                await ExecuteCommandFromUiAsync(_selectedNode.Command);
+                return;
+            }
+
             if (_selectedNode?.Kind == ScriptNodeKind.Playlist && _selectedNode.Playlist != null)
             {
                 ClearRunLog();
@@ -919,6 +1098,7 @@ namespace GUI
             Dispatcher.UIThread.Post(() =>
             {
                 CompleteRunRow(result.ExecutionScopeId, result.IsSuccess, result.Duration, result.StartedAt);
+                PlayCompletionChime();
                 if (result.Exception != null)
                 {
                     AddRunMessage(result.ExecutionScopeId, result.Exception.ToString(), Logger.LogLevel.Error);
@@ -945,7 +1125,11 @@ namespace GUI
                 }
             }
 
-            Dispatcher.UIThread.Post(() => AppendLog($"Playlist {playlist.Name} completed."));
+            Dispatcher.UIThread.Post(() =>
+            {
+                AppendLog($"Playlist {playlist.Name} completed.");
+                PlayCompletionChime();
+            });
         }
 
         private async Task ExecutePlaylistRoutineItemAsync(PlaylistItemDefinition item)
@@ -1090,6 +1274,15 @@ namespace GUI
             _draggedPlaylistItemNode = null;
         }
 
+        private async void CommandTreeItem_DoubleTapped(object? sender, TappedEventArgs e)
+        {
+            if (e.Source is Control { DataContext: ScriptNode { Kind: ScriptNodeKind.Command, Command: { } command } })
+            {
+                await ExecuteCommandFromUiAsync(command);
+                e.Handled = true;
+            }
+        }
+
         private void PlaylistTreeItem_DragOver(object? sender, DragEventArgs e)
         {
             if (sender is not Control { DataContext: ScriptNode target }
@@ -1196,6 +1389,11 @@ namespace GUI
                     menu.Items.Add(CreateMenuItem("Refresh", RefreshScripts));
                     return menu;
 
+                case ScriptNodeKind.Command when node.Command != null:
+                    menu.Items.Add(CreateMenuItem("Run", async () => await ExecuteCommandFromUiAsync(node.Command)));
+                    menu.Items.Add(CreateMenuItem("Refresh", RefreshScripts));
+                    return menu;
+
                 default:
                     return null;
             }
@@ -1211,6 +1409,68 @@ namespace GUI
         private void RefreshScripts()
         {
             _runtime.ReloadScripts();
+        }
+
+        private Task<string?> ExecuteCommandAsync(CommandDefinition command)
+        {
+            try
+            {
+                switch (command.Type)
+                {
+                    case CommandType.Url:
+                        if (!Uri.TryCreate(command.Target, UriKind.Absolute, out var uri)
+                            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+                        {
+                            return Task.FromResult<string?>($"Command '{command.Name}' has an invalid HTTP(S) URL.");
+                        }
+
+                        if (Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }) == null)
+                        {
+                            return Task.FromResult<string?>($"Command '{command.Name}' could not open the URL.");
+                        }
+
+                        AppendLog($"Opened {command.Name}.");
+                        return Task.FromResult<string?>(null);
+
+                    case CommandType.Program:
+                        if (string.IsNullOrWhiteSpace(command.Target))
+                        {
+                            return Task.FromResult<string?>($"Command '{command.Name}' has no program target.");
+                        }
+
+                        if (Process.Start(new ProcessStartInfo(command.Target)
+                        {
+                            Arguments = command.Arguments ?? string.Empty,
+                            UseShellExecute = true,
+                        }) == null)
+                        {
+                            return Task.FromResult<string?>($"Command '{command.Name}' could not start the program.");
+                        }
+
+                        AppendLog($"Started {command.Name}.");
+                        return Task.FromResult<string?>(null);
+
+                    default:
+                        return Task.FromResult<string?>($"Command '{command.Name}' has an unsupported type.");
+                }
+            }
+            catch (Exception exception) when (exception is System.ComponentModel.Win32Exception
+                or InvalidOperationException
+                or NotSupportedException)
+            {
+                var error = $"Command '{command.Name}' failed: {exception.Message}";
+                AppendLog(error);
+                return Task.FromResult<string?>(error);
+            }
+        }
+
+        private async Task ExecuteCommandFromUiAsync(CommandDefinition command)
+        {
+            var error = await ExecuteCommandAsync(command);
+            if (!string.IsNullOrWhiteSpace(error))
+            {
+                AppendLog(error);
+            }
         }
 
         private async Task RenamePlaylistAsync(PlaylistDefinition playlist)
@@ -1422,6 +1682,17 @@ namespace GUI
             _treeNodes.Add(playlistsRoot);
             return playlistsRoot;
         }
+
+        private static void PlayCompletionChime()
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                MessageBeep(MessageBeepInformation);
+            }
+        }
+
+        [DllImport("user32.dll")]
+        private static extern bool MessageBeep(uint type);
 
         private static bool TryConvert(Type type, string value, out object? output)
         {
@@ -1671,6 +1942,11 @@ namespace GUI
             return Path.Combine(_scriptsRoot, ".scriptor", "playlists.json");
         }
 
+        private string GetCommandsPath()
+        {
+            return Path.Combine(_scriptsRoot, ".scriptor", "commands.json");
+        }
+
         private string GetWindowStatePath()
         {
             return Path.Combine(_scriptsRoot, ".scriptor", "window-state.json");
@@ -1764,6 +2040,118 @@ namespace GUI
             }
         }
 
+        private List<CommandDefinition> LoadCommands()
+        {
+            try
+            {
+                var path = GetCommandsPath();
+                if (!File.Exists(path))
+                {
+                    var defaultCommands = CreateDefaultCommands();
+                    SaveCommands(defaultCommands);
+                    return defaultCommands;
+                }
+
+                var json = File.ReadAllText(path);
+                var commands = JsonSerializer.Deserialize<List<CommandDefinition>>(json) ?? new List<CommandDefinition>();
+                if (AddMissingDefaultCommands(commands))
+                {
+                    SaveCommands(commands);
+                }
+
+                return commands;
+            }
+            catch
+            {
+                return new List<CommandDefinition>();
+            }
+        }
+
+        private static List<CommandDefinition> CreateDefaultCommands()
+        {
+            return
+            [
+                new()
+                {
+                    Name = "Open Pond.net",
+                    Description = "Open the Pond.net website in your default browser.",
+                    Type = CommandType.Url,
+                    Target = "https://pond.net",
+                },
+                new()
+                {
+                    Name = "Open MakeMKV",
+                    Description = "Start MakeMKV from its standard Windows installation path.",
+                    Type = CommandType.Program,
+                    Target = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                        "MakeMKV",
+                        "makemkv.exe"),
+                },
+            ];
+        }
+
+        private static bool AddMissingDefaultCommands(List<CommandDefinition> commands)
+        {
+            var changed = false;
+            foreach (var defaultCommand in CreateDefaultCommands())
+            {
+                var matchingCommands = commands
+                    .Where(command => IsSameCommandAction(command, defaultCommand))
+                    .ToList();
+                if (matchingCommands.Count == 0)
+                {
+                    commands.Add(defaultCommand);
+                    changed = true;
+                    continue;
+                }
+
+                var commandToKeep = matchingCommands.FirstOrDefault(command =>
+                    !string.Equals(command.Name, defaultCommand.Name, StringComparison.OrdinalIgnoreCase))
+                    ?? matchingCommands[0];
+                foreach (var duplicate in matchingCommands.Where(command =>
+                    !ReferenceEquals(command, commandToKeep)
+                    && string.Equals(command.Name, defaultCommand.Name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    commands.Remove(duplicate);
+                    changed = true;
+                }
+            }
+
+            return changed;
+        }
+
+        private static bool IsSameCommandAction(CommandDefinition first, CommandDefinition second)
+        {
+            if (first.Type != second.Type)
+            {
+                return false;
+            }
+
+            if (first.Type == CommandType.Url
+                && Uri.TryCreate(first.Target, UriKind.Absolute, out var firstUri)
+                && Uri.TryCreate(second.Target, UriKind.Absolute, out var secondUri))
+            {
+                return Uri.Compare(
+                    firstUri,
+                    secondUri,
+                    UriComponents.SchemeAndServer | UriComponents.Path,
+                    UriFormat.SafeUnescaped,
+                    StringComparison.OrdinalIgnoreCase) == 0;
+            }
+
+            return string.Equals(first.Target, second.Target, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(first.Arguments, second.Arguments, StringComparison.Ordinal);
+        }
+
+        private void SaveCommands(List<CommandDefinition> commands)
+        {
+            var path = GetCommandsPath();
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            var json = JsonSerializer.Serialize(commands, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(path, json);
+        }
+
         private void SavePlaylists(List<PlaylistDefinition> playlists, PlaylistDefinition? editedPlaylist = null)
         {
             if (editedPlaylist != null)
@@ -1806,6 +2194,39 @@ namespace GUI
         {
             _runRowsByScope.Clear();
             _runLogRowsPanel.Children.Clear();
+        }
+
+        private async void CopyRunLogButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+        {
+            var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+            if (clipboard == null)
+            {
+                AppendLog("Clipboard is unavailable.");
+                return;
+            }
+
+            await clipboard.SetTextAsync(BuildRunLogText());
+        }
+
+        private string BuildRunLogText()
+        {
+            var output = new StringBuilder();
+            foreach (var row in _runRowsByScope.Values.OrderBy(row => row.StartedAt))
+            {
+                output.Append('[')
+                    .Append(row.StartedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"))
+                    .Append("] ")
+                    .Append(row.Status)
+                    .Append(": ")
+                    .AppendLine(row.ScriptName);
+
+                foreach (var entry in row.Entries)
+                {
+                    output.Append("  ").AppendLine(entry);
+                }
+            }
+
+            return output.ToString();
         }
 
         private void ScrollRunLogToBottom()
@@ -1926,6 +2347,7 @@ namespace GUI
             var row = new RoutineRunRowUi(scopeId, scriptName, toggleButton, detailsPanel, statusText, statusBadge, timeText, startedAt)
             {
                 IsRunning = isRunning,
+                Status = isRunning ? "Running" : "Idle",
                 CollapseOnComplete = collapseOnComplete,
             };
             row.ToggleButton.Content = row.DetailsPanel.IsVisible ? "▾" : "▸";
@@ -1941,6 +2363,7 @@ namespace GUI
             }
 
             var levelText = level == Logger.LogLevel.Error ? "ERROR" : level == Logger.LogLevel.Warning ? "WARN" : "INFO";
+            row.Entries.Add($"[{DateTime.Now:HH:mm:ss}] {levelText}: {message}");
             var levelBrush = level == Logger.LogLevel.Error
                 ? Brushes.Red
                 : level == Logger.LogLevel.Warning
@@ -2156,6 +2579,11 @@ namespace GUI
 
             if (progressBar.LastDetailPercent is null || Math.Abs(clamped - progressBar.LastDetailPercent.Value) >= 10)
             {
+                if (_runRowsByScope.TryGetValue(scopeId, out var row))
+                {
+                    row.Entries.Add($"[{DateTime.Now:HH:mm:ss}] {progressKey}: {clamped:0.#}% - {message}");
+                }
+
                 progressBar.DetailsPanel.Children.Add(new TextBlock
                 {
                     Text = $"[{DateTime.Now:HH:mm:ss}] {clamped:0.#}% - {message}",
@@ -2171,6 +2599,10 @@ namespace GUI
         private void AddProgressDetailMessage(string scopeId, string progressKey, string message, Logger.LogLevel level)
         {
             var progressRow = EnsureProgressRow(scopeId, progressKey, progressKey);
+            if (_runRowsByScope.TryGetValue(scopeId, out var row))
+            {
+                row.Entries.Add($"[{DateTime.Now:HH:mm:ss}] {progressKey}: {message}");
+            }
 
             var detail = new TextBlock
             {
@@ -2196,6 +2628,7 @@ namespace GUI
             }
 
             row.IsRunning = false;
+            row.Status = success ? "Succeeded" : "Failed";
             row.StatusText.Text = success ? "✓" : "✗";
             row.StatusText.Foreground = success ? SuccessStatusBrush : FailureStatusBrush;
             row.StatusBadge.Background = Brushes.Transparent;
@@ -2211,6 +2644,7 @@ namespace GUI
         private void AppendLog(string message)
         {
             var row = StartRunRow("system", "System", DateTimeOffset.Now, false);
+            row.Entries.Add($"[{DateTime.Now:HH:mm:ss}] {message}");
             var line = new TextBlock { Text = $"[{DateTime.Now:HH:mm:ss}] {message}", TextWrapping = Avalonia.Media.TextWrapping.Wrap };
             row.DetailsPanel.Children.Add(line);
             row.DetailsPanel.IsVisible = true;
@@ -2248,6 +2682,8 @@ namespace GUI
             public TextBlock TimeText { get; }
             public DateTimeOffset StartedAt { get; }
             public Dictionary<string, ProgressRowUi> ProgressBars { get; } = new(StringComparer.OrdinalIgnoreCase);
+            public List<string> Entries { get; } = new();
+            public string Status { get; set; } = "Running";
             public bool IsRunning { get; set; }
             public bool CollapseOnComplete { get; set; }
         }
@@ -2270,6 +2706,9 @@ namespace GUI
             Logger.EntryWritten -= Logger_EntryWritten;
             _statusSpinnerTimer.Stop();
             _statusSpinnerTimer.Tick -= StatusSpinnerTimer_Tick;
+            _commandsReloadTimer.Stop();
+            _commandsReloadTimer.Tick -= CommandsReloadTimer_Tick;
+            _commandsWatcher?.Dispose();
             _quickCommandHotKey.Pressed -= QuickCommandHotKey_Pressed;
             _quickCommandHotKey.Dispose();
             _runtime.Dispose();
