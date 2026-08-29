@@ -5,6 +5,7 @@
         Height="820"
         Background="#1E1E1E"
         Foreground="#D4D4D4"
+        Icon="avares://GUI/Assets/Scriptor_Icon_Pack/Scriptor.ico"
         Title="Scriptor GUI">
   <Window.Styles>
     <Style Selector="Button">
@@ -37,7 +38,7 @@
           <Button x:Name="ReloadButton" Content="Reload Scripts" />
           <Button x:Name="RunButton" Content="Run Selected" />
           <Button x:Name="NewPlaylistButton" Content="New Playlist" />
-          <Button x:Name="AddToPlaylistButton" Content="Add Routine To Playlist" />
+          <Button x:Name="EditPlaylistsButton" Content="Edit Playlists" />
           <Button x:Name="GenerateProjectButton" Content="Generate Project" />
           <Button x:Name="SettingsButton" Content="Settings" />
         </StackPanel>
@@ -64,7 +65,14 @@
             <TreeView Grid.Row="1" x:Name="CollectionsTree">
               <TreeView.ItemTemplate>
                 <TreeDataTemplate ItemsSource="{Binding Children}">
-                  <TextBlock Text="{Binding Name}" />
+                  <TextBlock Text="{Binding Name}"
+                             ToolTip.Tip="{Binding Description}"
+                             DragDrop.AllowDrop="True"
+                             PointerPressed="PlaylistTreeItem_PointerPressed"
+                             PointerMoved="PlaylistTreeItem_PointerMoved"
+                             PointerReleased="PlaylistTreeItem_PointerReleased"
+                             DragDrop.DragOver="PlaylistTreeItem_DragOver"
+                             DragDrop.Drop="PlaylistTreeItem_Drop" />
                 </TreeDataTemplate>
               </TreeView.ItemTemplate>
             </TreeView>

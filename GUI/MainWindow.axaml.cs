@@ -30,6 +30,7 @@ namespace GUI
         private readonly List<PlaylistDefinition> _playlists = new();
         private readonly Dictionary<string, RoutineRunRowUi> _runRowsByScope = new(StringComparer.OrdinalIgnoreCase);
         private static readonly string[] SpinnerFrames = ["|", "/", "-", "\\"];
+        private const string PlaylistItemDragFormat = "application/x-scriptor-playlist-item";
         private readonly DispatcherTimer _statusSpinnerTimer = new() { Interval = TimeSpan.FromMilliseconds(110) };
         private int _spinnerFrameIndex;
         private static readonly IBrush PanelBorderBrush = new SolidColorBrush(Color.Parse("#3F3F46"));
@@ -47,7 +48,7 @@ namespace GUI
         private Button _reloadButton = null!;
         private Button _runButton = null!;
         private Button _newPlaylistButton = null!;
-        private Button _addToPlaylistButton = null!;
+        private Button _editPlaylistsButton = null!;
         private Button _generateProjectButton = null!;
         private Button _settingsButton = null!;
         private Button _runSelectedButton = null!;
@@ -62,6 +63,10 @@ namespace GUI
         private Action<List<ParameterViewModel>>? _saveDefaultsAction;
         private string _scriptsRoot = string.Empty;
         private readonly SettingsService _settingsService;
+        private readonly GlobalHotKey _quickCommandHotKey = new();
+        private ScriptNode? _draggedPlaylistItemNode;
+        private Point _dragStartPoint;
+        private QuickCommandWindow? _quickCommandWindow;
 
         public MainWindow()
         {
@@ -74,7 +79,7 @@ namespace GUI
             _reloadButton.Click += ReloadButton_Click;
             _runButton.Click += RunButton_Click;
             _newPlaylistButton.Click += NewPlaylistButton_Click;
-            _addToPlaylistButton.Click += AddToPlaylistButton_Click;
+            _editPlaylistsButton.Click += EditPlaylistsButton_Click;
             _generateProjectButton.Click += GenerateProjectButton_Click;
             _settingsButton.Click += SettingsButton_Click;
             _runSelectedButton.Click += RunButton_Click;
@@ -88,6 +93,8 @@ namespace GUI
 
             _statusSpinnerTimer.Tick += StatusSpinnerTimer_Tick;
             _statusSpinnerTimer.Start();
+            _quickCommandHotKey.Pressed += QuickCommandHotKey_Pressed;
+            Opened += MainWindow_Opened;
         }
 
         private void InitializeComponent()
@@ -100,7 +107,7 @@ namespace GUI
             _reloadButton = this.FindControl<Button>("ReloadButton") ?? throw new InvalidOperationException("ReloadButton not found.");
             _runButton = this.FindControl<Button>("RunButton") ?? throw new InvalidOperationException("RunButton not found.");
             _newPlaylistButton = this.FindControl<Button>("NewPlaylistButton") ?? throw new InvalidOperationException("NewPlaylistButton not found.");
-            _addToPlaylistButton = this.FindControl<Button>("AddToPlaylistButton") ?? throw new InvalidOperationException("AddToPlaylistButton not found.");
+            _editPlaylistsButton = this.FindControl<Button>("EditPlaylistsButton") ?? throw new InvalidOperationException("EditPlaylistsButton not found.");
             _generateProjectButton = this.FindControl<Button>("GenerateProjectButton") ?? throw new InvalidOperationException("GenerateProjectButton not found.");
             _settingsButton = this.FindControl<Button>("SettingsButton") ?? throw new InvalidOperationException("SettingsButton not found.");
             _runSelectedButton = this.FindControl<Button>("RunSelectedButton") ?? throw new InvalidOperationException("RunSelectedButton not found.");
@@ -133,6 +140,100 @@ namespace GUI
             _runtime.CompilationFailed += Runtime_CompilationFailed;
             _runtime.StartWatching();
             _runtime.ReloadScripts();
+        }
+
+        private void MainWindow_Opened(object? sender, EventArgs e)
+        {
+            if (!_quickCommandHotKey.TryRegister(out var error))
+            {
+                AppendLog($"Windows+Alt+S quick command is unavailable: {error}");
+            }
+        }
+
+        private void QuickCommandHotKey_Pressed(object? sender, EventArgs e)
+        {
+            Dispatcher.UIThread.Post(ShowQuickCommandWindow);
+        }
+
+        private void ShowQuickCommandWindow()
+        {
+            if (_quickCommandWindow != null)
+            {
+                _quickCommandWindow.Activate();
+                return;
+            }
+
+            _quickCommandWindow = new QuickCommandWindow(
+                _routinesById.Values.OrderBy(routine => routine.Name).ToList(),
+                RunQuickRoutineAsync,
+                ExecuteQuickCommand);
+            _quickCommandWindow.Closed += (_, _) => _quickCommandWindow = null;
+
+            if (GlobalHotKey.TryGetCursorPosition(out var cursorX, out var cursorY)
+                && Screens.ScreenFromPoint(new PixelPoint(cursorX, cursorY)) is { } screen)
+            {
+                var width = (int)Math.Round(_quickCommandWindow.Width * screen.Scaling);
+                var height = (int)Math.Round(_quickCommandWindow.Height * screen.Scaling);
+                _quickCommandWindow.Position = new PixelPoint(
+                    screen.Bounds.X + Math.Max(0, (screen.Bounds.Width - width) / 2),
+                    screen.Bounds.Y + Math.Max(0, (screen.Bounds.Height - height) / 2));
+            }
+
+            _quickCommandWindow.Show();
+            _quickCommandWindow.Activate();
+        }
+
+        private async Task<string?> RunQuickRoutineAsync(
+            ScriptRoutineDescriptor routine,
+            IReadOnlyDictionary<string, string> parameterValues)
+        {
+            var arguments = new List<object?>();
+            foreach (var parameter in routine.Parameters)
+            {
+                var name = parameter.DisplayName ?? parameter.Name;
+                var value = parameterValues.TryGetValue(name, out var overridden)
+                    ? overridden
+                    : parameter.DefaultValue?.ToString() ?? string.Empty;
+                if (!TryConvert(parameter.ParameterType, value, out var converted))
+                {
+                    return $"Invalid value for {name} ({parameter.ParameterType.Name}).";
+                }
+
+                arguments.Add(converted);
+            }
+
+            var scopeId = Guid.NewGuid().ToString("N");
+            StartRunRow(scopeId, routine.Name, DateTimeOffset.Now, isRunning: true, collapseOnComplete: false);
+            AddRunMessage(scopeId, $"Running {routine.Name} from quick command...");
+            var result = await _runtime.ExecuteRoutineAsync(routine, arguments, scopeId);
+            CompleteRunRow(result.ExecutionScopeId, result.IsSuccess, result.Duration, result.StartedAt);
+            if (result.Exception == null)
+            {
+                return result.IsSuccess ? null : $"Routine '{routine.Name}' failed.";
+            }
+
+            AddRunMessage(result.ExecutionScopeId, result.Exception.ToString(), Logger.LogLevel.Error);
+            return result.Exception.Message;
+        }
+
+        private void ExecuteQuickCommand(QuickCommandAction command)
+        {
+            switch (command)
+            {
+                case QuickCommandAction.Reload:
+                    _runtime.ReloadScripts();
+                    break;
+
+                case QuickCommandAction.Show:
+                    WindowState = WindowState.Normal;
+                    Show();
+                    Activate();
+                    break;
+
+                case QuickCommandAction.Minimize:
+                    WindowState = WindowState.Minimized;
+                    break;
+            }
         }
 
         private async void SettingsButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -307,9 +408,11 @@ namespace GUI
                 Description = "Playlist execution (sequential; parallel groups run concurrently).",
             };
 
-            foreach (var item in playlist.Items)
+            for (var index = 0; index < playlist.Items.Count; index++)
             {
-                playlistNode.Children.Add(BuildPlaylistItemNode(playlist, item));
+                var itemNode = BuildPlaylistItemNode(playlist, playlist.Items[index]);
+                itemNode.Name = $"{index + 1}. {itemNode.Name}";
+                playlistNode.Children.Add(itemNode);
             }
 
             return playlistNode;
@@ -774,7 +877,7 @@ namespace GUI
         private void SavePlaylistItemDefaults(PlaylistItemDefinition item, List<ParameterViewModel> values)
         {
             item.ParameterValues = values.ToDictionary(p => p.Name, p => p.Value, StringComparer.OrdinalIgnoreCase);
-            SavePlaylists(_playlists);
+            SavePlaylists(_playlists, _selectedNode?.Playlist);
         }
 
         private async void RunButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -900,56 +1003,411 @@ namespace GUI
                 name = $"{baseName} {index}";
             }
 
-            _playlists.Add(new PlaylistDefinition { Name = name });
-            SavePlaylists(_playlists);
-
-            var playlist = _playlists.Last();
+            var playlist = new PlaylistDefinition { Name = name };
+            _playlists.Add(playlist);
+            SavePlaylists(_playlists, playlist);
             var playlistsRoot = GetOrCreatePlaylistsRootNode();
             var playlistNode = BuildPlaylistNode(playlist);
             playlistsRoot.Children.Add(playlistNode);
             _collectionsTree.SelectedItem = playlistNode;
         }
 
-        private void AddToPlaylistButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+        private async void EditPlaylistsButton_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
         {
-            if (_selectedNode?.Routine == null)
+            await ShowPlaylistEditorAsync(_selectedNode?.Playlist);
+        }
+
+        private async Task ShowPlaylistEditorAsync(PlaylistDefinition? selectedPlaylist, ScriptRoutineDescriptor? routineToAdd = null)
+        {
+            SaveCurrentRoutineDefaults();
+
+            var editor = new PlaylistEditorWindow(
+                _playlists,
+                _routinesById.Values.OrderBy(routine => routine.Name).ToList(),
+                GetRoutineKey,
+                playlist => SavePlaylists(_playlists, playlist),
+                selectedPlaylist,
+                routineToAdd);
+
+            await editor.ShowDialog(this);
+            RefreshPlaylistTree(editor.SelectedPlaylistName, editor.SelectedPlaylistItemId);
+        }
+
+        private void PlaylistTreeItem_PointerPressed(object? sender, PointerPressedEventArgs e)
+        {
+            if (sender is not Control control || control.DataContext is not ScriptNode node)
             {
-                AppendLog("Select a routine under Collections to add to a playlist.");
                 return;
             }
 
-            var targetPlaylist = _selectedNode?.Playlist
-                ?? _playlists.FirstOrDefault()
-                ?? CreateDefaultPlaylist();
+            var point = e.GetCurrentPoint(control);
+            if (point.Properties.IsRightButtonPressed)
+            {
+                _collectionsTree.SelectedItem = node;
+                var menu = CreateTreeContextMenu(node);
+                if (menu == null)
+                {
+                    return;
+                }
 
-            var routine = _selectedNode.Routine;
-            var item = new PlaylistItemDefinition
+                menu.Open(control);
+                e.Handled = true;
+                return;
+            }
+
+            if (point.Properties.IsLeftButtonPressed && node.Kind == ScriptNodeKind.PlaylistRoutine)
+            {
+                _draggedPlaylistItemNode = node;
+                _dragStartPoint = e.GetPosition(_collectionsTree);
+            }
+        }
+
+        private async void PlaylistTreeItem_PointerMoved(object? sender, PointerEventArgs e)
+        {
+            if (_draggedPlaylistItemNode == null
+                || sender is not Control control
+                || control.DataContext is not ScriptNode node
+                || !ReferenceEquals(node, _draggedPlaylistItemNode)
+                || !e.GetCurrentPoint(control).Properties.IsLeftButtonPressed)
+            {
+                return;
+            }
+
+            var position = e.GetPosition(_collectionsTree);
+            if (Math.Abs(position.X - _dragStartPoint.X) < 4 && Math.Abs(position.Y - _dragStartPoint.Y) < 4)
+            {
+                return;
+            }
+
+            _draggedPlaylistItemNode = null;
+            var data = new DataObject();
+            data.Set(PlaylistItemDragFormat, node.PlaylistItem!.Id);
+            await DragDrop.DoDragDrop(e, data, DragDropEffects.Move);
+        }
+
+        private void PlaylistTreeItem_PointerReleased(object? sender, PointerReleasedEventArgs e)
+        {
+            _draggedPlaylistItemNode = null;
+        }
+
+        private void PlaylistTreeItem_DragOver(object? sender, DragEventArgs e)
+        {
+            if (sender is not Control { DataContext: ScriptNode target }
+                || target.Kind != ScriptNodeKind.PlaylistRoutine
+                || !e.Data.Contains(PlaylistItemDragFormat))
+            {
+                e.DragEffects = DragDropEffects.None;
+                return;
+            }
+
+            var sourceItemId = e.Data.Get(PlaylistItemDragFormat) as string;
+            var sourceNode = FindNode(_treeNodes, node => node.PlaylistItem?.Id == sourceItemId);
+            if (sourceNode?.Kind != ScriptNodeKind.PlaylistRoutine
+                || sourceNode.Playlist == null
+                || !ReferenceEquals(sourceNode.Playlist, target.Playlist)
+                || !AreInSamePlaylistContainer(sourceNode.Playlist, sourceNode.PlaylistItem!, target.PlaylistItem!))
+            {
+                e.DragEffects = DragDropEffects.None;
+                return;
+            }
+
+            e.DragEffects = DragDropEffects.Move;
+            e.Handled = true;
+        }
+
+        private void PlaylistTreeItem_Drop(object? sender, DragEventArgs e)
+        {
+            if (sender is not Control control
+                || control.DataContext is not ScriptNode target
+                || target.Kind != ScriptNodeKind.PlaylistRoutine
+                || target.Playlist == null
+                || target.PlaylistItem == null
+                || !e.Data.Contains(PlaylistItemDragFormat)
+                || e.Data.Get(PlaylistItemDragFormat) is not string sourceItemId)
+            {
+                return;
+            }
+
+            var sourceNode = FindNode(_treeNodes, node => node.PlaylistItem?.Id == sourceItemId);
+            if (sourceNode?.Kind != ScriptNodeKind.PlaylistRoutine
+                || sourceNode.PlaylistItem == null
+                || !ReferenceEquals(sourceNode.Playlist, target.Playlist)
+                || ReferenceEquals(sourceNode.PlaylistItem, target.PlaylistItem)
+                || !TryMovePlaylistItem(target.Playlist, sourceNode.PlaylistItem, target.PlaylistItem, e.GetPosition(control).Y > control.Bounds.Height / 2))
+            {
+                return;
+            }
+
+            SavePlaylists(_playlists, target.Playlist);
+            RefreshPlaylistTree(target.Playlist.Name, sourceNode.PlaylistItem.Id);
+            e.Handled = true;
+        }
+
+        private ContextMenu? CreateTreeContextMenu(ScriptNode node)
+        {
+            var menu = new ContextMenu();
+            switch (node.Kind)
+            {
+                case ScriptNodeKind.Routine when node.Routine != null:
+                    var addToPlaylistMenu = new MenuItem { Header = "Add to Playlist" };
+                    foreach (var playlist in _playlists
+                        .OrderByDescending(playlist => playlist.LastEditedAt ?? DateTimeOffset.MinValue)
+                        .ThenBy(playlist => playlist.Name, StringComparer.OrdinalIgnoreCase))
+                    {
+                        addToPlaylistMenu.Items.Add(CreateMenuItem(playlist.Name, () => AddRoutineToPlaylist(node.Routine, playlist)));
+                    }
+
+                    if (_playlists.Count == 0)
+                    {
+                        addToPlaylistMenu.IsEnabled = false;
+                    }
+
+                    menu.Items.Add(addToPlaylistMenu);
+                    menu.Items.Add(CreateMenuItem("Add to New Playlist", async () => await AddRoutineToNewPlaylistAsync(node.Routine)));
+                    menu.Items.Add(CreateMenuItem("Refresh", RefreshScripts));
+                    return menu;
+
+                case ScriptNodeKind.Playlist when node.Playlist != null:
+                    menu.Items.Add(CreateMenuItem("Rename", async () => await RenamePlaylistAsync(node.Playlist)));
+                    menu.Items.Add(CreateMenuItem("Edit", async () => await ShowPlaylistEditorAsync(node.Playlist)));
+                    menu.Items.Add(CreateMenuItem("Remove", async () => await RemovePlaylistAsync(node.Playlist)));
+                    menu.Items.Add(new Separator());
+                    menu.Items.Add(CreateMenuItem("Refresh", RefreshScripts));
+                    return menu;
+
+                case ScriptNodeKind.PlaylistRoutine when node.Playlist != null && node.PlaylistItem != null:
+                    if (node.Routine != null)
+                    {
+                        menu.Items.Add(CreateMenuItem("Edit Parameters", () =>
+                        {
+                            _collectionsTree.SelectedItem = node;
+                            DisplayRoutine(node.Routine, node.PlaylistItem.ParameterValues, values => SavePlaylistItemDefaults(node.PlaylistItem, values));
+                        }));
+                    }
+
+                    menu.Items.Add(CreateMenuItem("Remove from Playlist", () => RemovePlaylistItem(node.Playlist, node.PlaylistItem)));
+                    menu.Items.Add(new Separator());
+                    menu.Items.Add(CreateMenuItem("Refresh", RefreshScripts));
+                    return menu;
+
+                case ScriptNodeKind.PlaylistParallelGroup when node.Playlist != null && node.PlaylistItem != null:
+                    menu.Items.Add(CreateMenuItem("Remove Parallel Group", () => RemovePlaylistItem(node.Playlist, node.PlaylistItem)));
+                    menu.Items.Add(new Separator());
+                    menu.Items.Add(CreateMenuItem("Refresh", RefreshScripts));
+                    return menu;
+
+                default:
+                    return null;
+            }
+        }
+
+        private static MenuItem CreateMenuItem(string header, Action action)
+        {
+            var item = new MenuItem { Header = header };
+            item.Click += (_, _) => action();
+            return item;
+        }
+
+        private void RefreshScripts()
+        {
+            _runtime.ReloadScripts();
+        }
+
+        private async Task RenamePlaylistAsync(PlaylistDefinition playlist)
+        {
+            var name = await PlaylistNameDialog.ShowAsync(this, "Rename Playlist", playlist.Name);
+            if (name == null || string.Equals(name, playlist.Name, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (_playlists.Any(existing => !ReferenceEquals(existing, playlist)
+                && string.Equals(existing.Name, name, StringComparison.OrdinalIgnoreCase)))
+            {
+                await PlaylistNameDialog.ShowMessageAsync(this, "Playlist names must be unique.");
+                return;
+            }
+
+            playlist.Name = name;
+            SavePlaylists(_playlists, playlist);
+            RefreshPlaylistTree(playlist.Name);
+        }
+
+        private async Task RemovePlaylistAsync(PlaylistDefinition playlist)
+        {
+            if (!await PlaylistNameDialog.ConfirmAsync(this, $"Delete playlist '{playlist.Name}'?"))
+            {
+                return;
+            }
+
+            _playlists.Remove(playlist);
+            SavePlaylists(_playlists);
+            RefreshPlaylistTree();
+        }
+
+        private async Task AddRoutineToNewPlaylistAsync(ScriptRoutineDescriptor routine)
+        {
+            var baseName = $"{routine.Name} Playlist";
+            var name = await PlaylistNameDialog.ShowAsync(this, "New Playlist", GetUniquePlaylistName(baseName));
+            if (name == null)
+            {
+                return;
+            }
+
+            if (_playlists.Any(playlist => string.Equals(playlist.Name, name, StringComparison.OrdinalIgnoreCase)))
+            {
+                await PlaylistNameDialog.ShowMessageAsync(this, "Playlist names must be unique.");
+                return;
+            }
+
+            var item = CreatePlaylistItem(routine);
+            var playlist = new PlaylistDefinition { Name = name, Items = [item] };
+            _playlists.Add(playlist);
+            SavePlaylists(_playlists, playlist);
+            RefreshPlaylistTree(playlist.Name, item.Id);
+        }
+
+        private void AddRoutineToPlaylist(ScriptRoutineDescriptor routine, PlaylistDefinition playlist)
+        {
+            var item = CreatePlaylistItem(routine);
+            playlist.Items.Add(item);
+            SavePlaylists(_playlists, playlist);
+            RefreshPlaylistTree(playlist.Name, item.Id);
+        }
+
+        private void RemovePlaylistItem(PlaylistDefinition playlist, PlaylistItemDefinition item)
+        {
+            var container = FindPlaylistItemContainer(playlist, item);
+            if (container == null)
+            {
+                return;
+            }
+
+            container.Remove(item);
+            SavePlaylists(_playlists, playlist);
+            RefreshPlaylistTree(playlist.Name);
+        }
+
+        private PlaylistItemDefinition CreatePlaylistItem(ScriptRoutineDescriptor routine)
+        {
+            return new PlaylistItemDefinition
             {
                 Type = PlaylistItemType.Routine,
                 DisplayName = routine.Name,
                 RoutineId = GetRoutineKey(routine),
-                ParameterValues = _parameterViewModels.ToDictionary(p => p.Name, p => p.Value, StringComparer.OrdinalIgnoreCase),
+                ParameterValues = routine.Parameters.ToDictionary(
+                    parameter => parameter.DisplayName ?? parameter.Name,
+                    parameter => parameter.DefaultValue?.ToString() ?? string.Empty,
+                    StringComparer.OrdinalIgnoreCase),
             };
+        }
 
-            targetPlaylist.Items.Add(item);
-            SavePlaylists(_playlists);
-
-            var playlistsRoot = GetOrCreatePlaylistsRootNode();
-            var playlistNode = playlistsRoot.Children.FirstOrDefault(n =>
-                n.Kind == ScriptNodeKind.Playlist &&
-                string.Equals(n.Name, targetPlaylist.Name, StringComparison.OrdinalIgnoreCase));
-
-            if (playlistNode == null)
+        private string GetUniquePlaylistName(string baseName)
+        {
+            var name = baseName;
+            var suffix = 2;
+            while (_playlists.Any(playlist => string.Equals(playlist.Name, name, StringComparison.OrdinalIgnoreCase)))
             {
-                playlistNode = BuildPlaylistNode(targetPlaylist);
-                playlistsRoot.Children.Add(playlistNode);
+                name = $"{baseName} {suffix++}";
             }
 
-            var playlistItemNode = BuildPlaylistItemNode(targetPlaylist, item);
-            playlistNode.Children.Add(playlistItemNode);
-            _collectionsTree.SelectedItem = playlistItemNode;
+            return name;
+        }
 
-            AppendLog($"Added '{routine.Name}' to playlist '{targetPlaylist.Name}'.");
+        private static bool TryMovePlaylistItem(PlaylistDefinition playlist, PlaylistItemDefinition source, PlaylistItemDefinition target, bool insertAfter)
+        {
+            var sourceContainer = FindPlaylistItemContainer(playlist, source);
+            var targetContainer = FindPlaylistItemContainer(playlist, target);
+            if (sourceContainer == null || targetContainer == null || !ReferenceEquals(sourceContainer, targetContainer))
+            {
+                return false;
+            }
+
+            var sourceIndex = sourceContainer.IndexOf(source);
+            var targetIndex = sourceContainer.IndexOf(target);
+            sourceContainer.RemoveAt(sourceIndex);
+            if (sourceIndex < targetIndex)
+            {
+                targetIndex--;
+            }
+
+            sourceContainer.Insert(targetIndex + (insertAfter ? 1 : 0), source);
+            return true;
+        }
+
+        private static bool AreInSamePlaylistContainer(PlaylistDefinition playlist, PlaylistItemDefinition first, PlaylistItemDefinition second)
+        {
+            var firstContainer = FindPlaylistItemContainer(playlist, first);
+            var secondContainer = FindPlaylistItemContainer(playlist, second);
+            return firstContainer != null && ReferenceEquals(firstContainer, secondContainer);
+        }
+
+        private static List<PlaylistItemDefinition>? FindPlaylistItemContainer(PlaylistDefinition playlist, PlaylistItemDefinition item)
+        {
+            if (playlist.Items.Contains(item))
+            {
+                return playlist.Items;
+            }
+
+            foreach (var group in playlist.Items.Where(candidate => candidate.Type == PlaylistItemType.ParallelGroup))
+            {
+                var container = FindPlaylistItemContainer(group, item);
+                if (container != null)
+                {
+                    return container;
+                }
+            }
+
+            return null;
+        }
+
+        private static List<PlaylistItemDefinition>? FindPlaylistItemContainer(PlaylistItemDefinition group, PlaylistItemDefinition item)
+        {
+            if (group.Children.Contains(item))
+            {
+                return group.Children;
+            }
+
+            foreach (var child in group.Children.Where(candidate => candidate.Type == PlaylistItemType.ParallelGroup))
+            {
+                var container = FindPlaylistItemContainer(child, item);
+                if (container != null)
+                {
+                    return container;
+                }
+            }
+
+            return null;
+        }
+
+        private void RefreshPlaylistTree(string? selectPlaylistName = null, string? selectPlaylistItemId = null)
+        {
+            var playlistsRoot = GetOrCreatePlaylistsRootNode();
+            playlistsRoot.Children.Clear();
+            foreach (var playlist in _playlists)
+            {
+                playlistsRoot.Children.Add(BuildPlaylistNode(playlist));
+            }
+
+            if (!string.IsNullOrWhiteSpace(selectPlaylistItemId))
+            {
+                var itemNode = FindNode(playlistsRoot.Children, node => node.PlaylistItem?.Id == selectPlaylistItemId);
+                if (itemNode != null)
+                {
+                    _collectionsTree.SelectedItem = itemNode;
+                    return;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(selectPlaylistName))
+            {
+                var playlistNode = playlistsRoot.Children.FirstOrDefault(node =>
+                    string.Equals(node.Name, selectPlaylistName, StringComparison.OrdinalIgnoreCase));
+                if (playlistNode != null)
+                {
+                    _collectionsTree.SelectedItem = playlistNode;
+                }
+            }
         }
 
         private ScriptNode GetOrCreatePlaylistsRootNode()
@@ -963,13 +1421,6 @@ namespace GUI
             playlistsRoot = new ScriptNode { Name = "PlayLists", Kind = ScriptNodeKind.PlaylistsRoot };
             _treeNodes.Add(playlistsRoot);
             return playlistsRoot;
-        }
-
-        private PlaylistDefinition CreateDefaultPlaylist()
-        {
-            var playlist = new PlaylistDefinition { Name = "Default Playlist" };
-            _playlists.Add(playlist);
-            return playlist;
         }
 
         private static bool TryConvert(Type type, string value, out object? output)
@@ -1313,8 +1764,13 @@ namespace GUI
             }
         }
 
-        private void SavePlaylists(List<PlaylistDefinition> playlists)
+        private void SavePlaylists(List<PlaylistDefinition> playlists, PlaylistDefinition? editedPlaylist = null)
         {
+            if (editedPlaylist != null)
+            {
+                editedPlaylist.LastEditedAt = DateTimeOffset.UtcNow;
+            }
+
             var path = GetPlaylistsPath();
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             var json = JsonSerializer.Serialize(playlists, new JsonSerializerOptions { WriteIndented = true });
@@ -1814,6 +2270,8 @@ namespace GUI
             Logger.EntryWritten -= Logger_EntryWritten;
             _statusSpinnerTimer.Stop();
             _statusSpinnerTimer.Tick -= StatusSpinnerTimer_Tick;
+            _quickCommandHotKey.Pressed -= QuickCommandHotKey_Pressed;
+            _quickCommandHotKey.Dispose();
             _runtime.Dispose();
             base.OnClosed(e);
         }

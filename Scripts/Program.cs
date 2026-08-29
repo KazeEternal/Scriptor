@@ -745,6 +745,7 @@ namespace Scripts
         private sealed class PlaylistDefinition
         {
             public string Name { get; set; } = string.Empty;
+            public DateTimeOffset? LastEditedAt { get; set; }
             public List<PlaylistItemDefinition> Items { get; set; } = new();
         }
     }

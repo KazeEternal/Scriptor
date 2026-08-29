@@ -108,6 +108,10 @@ The GUI automatically picks editors by parameter type and usage hints:
   - `ui:multiline`
   - `ui:slider(min,max,step)`
 
+  ### Quick command
+  Keep the GUI running in the background or minimized, then press **Windows+Alt+S** to open a command palette centered on the display containing the mouse pointer. Search routines and press Enter to run them with their suggested default parameters, edit `Parameter=Value` overrides inline, or use `>reload`, `>show`, and `>minimize`.
+  The selected routine also shows its script and parameter descriptions from the routine attributes.
+
 ### Progress channels and task-level logs
 - `context.CreateProgressChannel(...)` for managed progress keys.
 - `Report(...)` for progress updates.
@@ -116,6 +120,8 @@ The GUI automatically picks editors by parameter type and usage hints:
 ### Playlists
 - Build playlists from routines.
 - Execute sequentially or via parallel groups.
+- Use **Edit Playlists** in the GUI to create, rename, reorder, and delete playlists; add routines, configure parallel groups, and change the per-playlist routine parameters by selecting the routine in the playlist tree.
+- Right-click a source routine to add it to a playlist or create a playlist for it. The **Add to Playlist** submenu lists most-recently edited playlists first. Right-click playlist entries to edit, remove, or refresh them, and drag a playlist routine onto a sibling to change its execution order.
 - Playlist item logs can collapse automatically on completion.
 - Can be executed from CLI (`--run-playlist`) for CI/CD scenarios.
 
